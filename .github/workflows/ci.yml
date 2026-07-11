@@ -7,6 +7,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: supersurf_test
+          POSTGRES_USER: supersurf_test
+          POSTGRES_PASSWORD: ""
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U supersurf_test -d supersurf_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -45,7 +60,19 @@ jobs:
       - name: mypy
         run: uv run mypy supersurf core users audit billing subscribers
 
+      - name: Django migration check
+        env:
+          DATABASE_URL: postgres://supersurf_test@localhost:5432/supersurf_test
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: PostgreSQL clean migrations
+        env:
+          DATABASE_URL: postgres://supersurf_test@localhost:5432/supersurf_test
+        run: uv run python manage.py migrate --noinput
+
       - name: Django checks
+        env:
+          DATABASE_URL: postgres://supersurf_test@localhost:5432/supersurf_test
         run: uv run python manage.py check
 
       - name: Django deployment checks
@@ -53,7 +80,7 @@ jobs:
           SUPERSURF_ENVIRONMENT: PRODUCTION
           DJANGO_DEBUG: "false"
           DJANGO_SECRET_KEY: prod-check-9a7bc25f-df43-43bb-b84e-1cf3ee701e6b-Xq84rL9mVz27
-          DATABASE_URL: postgres://supersurf:supersurf@localhost:5432/supersurf
+          DATABASE_URL: postgres://supersurf_test@localhost:5432/supersurf_test
           DJANGO_ALLOWED_HOSTS: supersurf.localhost
           DJANGO_CSRF_TRUSTED_ORIGINS: https://supersurf.localhost
         run: uv run python manage.py check --deploy --fail-level WARNING
@@ -61,6 +88,7 @@ jobs:
       - name: Tests
         env:
           CELERY_TASK_ALWAYS_EAGER: "true"
+          DATABASE_URL: postgres://supersurf_test@localhost:5432/supersurf_test
         run: uv run pytest
 
       - name: Secret scan

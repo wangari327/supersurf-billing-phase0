@@ -68,3 +68,18 @@ uv run pytest tests/test_auth_and_browser.py
 ```
 
 On the development machine, the Playwright browser download timed out, so the smoke test uses local Chrome as a fallback. CI installs Chromium explicitly.
+
+## PostgreSQL Concurrency Checks
+
+Local development may use SQLite when `DATABASE_URL` is absent. SQLite is fast for ordinary model, form, permission, and view tests, but it does not prove PostgreSQL row-lock ordering or blocking behavior.
+
+GitHub Actions runs PostgreSQL 17 with empty test-only credentials and sets `DATABASE_URL` for clean migrations, Django checks, deployment checks, and the full pytest suite. Treat the PostgreSQL CI run as authoritative for subscription locking behavior.
+
+To run the same profile locally, start PostgreSQL and set a test database URL before invoking Django commands:
+
+```powershell
+$env:DATABASE_URL="postgres://supersurf_test@localhost:5432/supersurf_test"
+uv run python manage.py migrate
+uv run python manage.py check
+uv run pytest
+```

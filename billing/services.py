@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from uuid import UUID
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
@@ -96,22 +97,66 @@ def _create_active_subscription(
     )
 
 
+def _is_active_subscription_conflict(error: IntegrityError) -> bool:
+    diag = getattr(getattr(error, "__cause__", None), "diag", None)
+    constraint_name = getattr(diag, "constraint_name", "")
+    if constraint_name == "billing_subscription_one_active_per_service":
+        return True
+
+    message = str(error).lower()
+    return (
+        "unique" in message
+        and "billing_subscription" in message
+        and "service_id" in message
+    )
+
+
+def _is_active_subscription_validation_conflict(error: ValidationError) -> bool:
+    return "billing_subscription_one_active_per_service" in str(error)
+
+
 def _save_new_subscription(subscription: Subscription) -> Subscription:
     try:
         with transaction.atomic():
             subscription.save()
+    except ValidationError as exc:
+        if not _is_active_subscription_validation_conflict(exc):
+            raise
+        raise ValidationError("This service already has an active subscription.") from exc
     except IntegrityError as exc:
+        if not _is_active_subscription_conflict(exc):
+            raise
         raise ValidationError("This service already has an active subscription.") from exc
     return subscription
 
 
-def _active_subscription_for_service(service: Service) -> Subscription | None:
+def _lock_service_and_subscriber_by_id(service_id: UUID) -> Service:
+    # Lock subscriptions service-first: service/subscriber, active subscription, package.
     return (
-        Subscription.objects.select_for_update()
-        .select_related("service", "plan")
-        .filter(service=service, status=Subscription.STATUS_ACTIVE)
+        Service.objects.select_related("subscriber")
+        .select_for_update(of=("self", "subscriber"))
+        .get(pk=service_id)
+    )
+
+
+def _lock_service_and_subscriber(service: Service) -> Service:
+    return _lock_service_and_subscriber_by_id(service.pk)
+
+
+def _lock_current_active_subscription(service: Service) -> Subscription | None:
+    return (
+        Subscription.objects.select_for_update(of=("self",))
+        .filter(service_id=service.pk, status=Subscription.STATUS_ACTIVE)
         .first()
     )
+
+
+def _lock_selected_plan(plan: Plan) -> Plan:
+    return Plan.objects.select_for_update(of=("self",)).get(pk=plan.pk)
+
+
+def _lookup_subscription_service_id(subscription: Subscription) -> UUID:
+    return Subscription.objects.only("service_id").get(pk=subscription.pk).service_id
 
 
 @transaction.atomic
@@ -191,21 +236,19 @@ def assign_package(
     request: HttpRequest | None = None,
 ) -> Subscription:
     _require_permission(actor, "subscribers.view_service", "billing.add_subscription")
-    locked_service = (
-        Service.objects.select_for_update().select_related("subscriber").get(pk=service.pk)
-    )
-    locked_plan = Plan.objects.select_for_update().get(pk=plan.pk)
+    locked_service = _lock_service_and_subscriber(service)
     reason = reason.strip()
     if not reason:
         raise ValidationError("Reason is required.")
-    if not locked_plan.is_active:
-        raise ValidationError("Only active packages can be assigned.")
     if not locked_service.is_active:
         raise ValidationError("Only active services can receive package assignments.")
     if not locked_service.subscriber.is_active:
         raise ValidationError("Only active subscribers can receive package assignments.")
-    if _active_subscription_for_service(locked_service) is not None:
+    if _lock_current_active_subscription(locked_service) is not None:
         raise ValidationError("This service already has an active subscription.")
+    locked_plan = _lock_selected_plan(plan)
+    if not locked_plan.is_active:
+        raise ValidationError("Only active packages can be assigned.")
 
     effective_at = timezone.now()
     subscription = _save_new_subscription(
@@ -242,22 +285,18 @@ def change_subscription_package(
     request: HttpRequest | None = None,
 ) -> Subscription:
     _require_permission(actor, "subscribers.view_service", "billing.change_subscription")
-    locked_subscription = (
-        Subscription.objects.select_for_update()
-        .select_related("service", "service__subscriber", "plan")
-        .get(pk=subscription.pk)
-    )
-    locked_service = (
-        Service.objects.select_for_update()
-        .select_related("subscriber")
-        .get(pk=locked_subscription.service_id)
-    )
-    locked_plan = Plan.objects.select_for_update().get(pk=plan.pk)
+    service_id = _lookup_subscription_service_id(subscription)
+    locked_service = _lock_service_and_subscriber_by_id(service_id)
     reason = reason.strip()
     if not reason:
         raise ValidationError("Reason is required.")
-    if locked_subscription.status != Subscription.STATUS_ACTIVE:
-        raise ValidationError("Only active subscriptions can be changed.")
+    locked_subscription = _lock_current_active_subscription(locked_service)
+    if locked_subscription is None or locked_subscription.pk != subscription.pk:
+        raise ValidationError("The selected subscription is no longer active.")
+    if locked_subscription.service_id != locked_service.pk:
+        raise ValidationError("The selected subscription no longer belongs to this service.")
+    locked_subscription.service = locked_service
+    locked_plan = _lock_selected_plan(plan)
     if locked_subscription.plan_id == locked_plan.pk:
         raise ValidationError("Choose a different active package.")
     if not locked_plan.is_active:
@@ -266,10 +305,6 @@ def change_subscription_package(
         raise ValidationError("Only active services can receive package changes.")
     if not locked_service.subscriber.is_active:
         raise ValidationError("Only active subscribers can receive package changes.")
-
-    active_subscription = _active_subscription_for_service(locked_service)
-    if active_subscription is None or active_subscription.pk != locked_subscription.pk:
-        raise ValidationError("The selected subscription is no longer active.")
 
     effective_at = timezone.now()
     old_subscription_id = str(locked_subscription.pk)
@@ -320,17 +355,17 @@ def end_subscription(
     request: HttpRequest | None = None,
 ) -> Subscription:
     _require_permission(actor, "subscribers.view_service", "billing.change_subscription")
-    locked_subscription = (
-        Subscription.objects.select_for_update()
-        .select_related("service", "service__subscriber", "plan")
-        .get(pk=subscription.pk)
-    )
-    Service.objects.select_for_update().get(pk=locked_subscription.service_id)
+    service_id = _lookup_subscription_service_id(subscription)
+    locked_service = _lock_service_and_subscriber_by_id(service_id)
     reason = reason.strip()
     if not reason:
         raise ValidationError("Reason is required.")
-    if locked_subscription.status != Subscription.STATUS_ACTIVE:
-        raise ValidationError("Only active subscriptions can be ended.")
+    locked_subscription = _lock_current_active_subscription(locked_service)
+    if locked_subscription is None or locked_subscription.pk != subscription.pk:
+        raise ValidationError("The selected subscription is no longer active.")
+    if locked_subscription.service_id != locked_service.pk:
+        raise ValidationError("The selected subscription no longer belongs to this service.")
+    locked_subscription.service = locked_service
 
     effective_at = timezone.now()
     locked_subscription.status = Subscription.STATUS_ENDED

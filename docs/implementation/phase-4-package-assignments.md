@@ -38,6 +38,18 @@ The database enforces:
 
 The model also rejects naive datetimes.
 
+## Locking
+
+Subscription mutations use one database row-lock order:
+
+1. lock the service and its subscriber
+2. lock the current active subscription for that service, when present
+3. lock the selected package
+
+Assignment, package change, and ending all use shared service-layer helpers for that order. Package change and ending may perform a non-locking lookup of the requested subscription's immutable `service_id`, but they must not lock a subscription before locking its service.
+
+On PostgreSQL, the helpers use `select_for_update(of=...)` so joined subscriber rows are locked only when intended. PostgreSQL is the authoritative database for proving row-lock behavior. SQLite remains useful for fast local tests and general behavior checks, but SQLite does not prove PostgreSQL row-lock ordering or blocking semantics.
+
 ## Lifecycle
 
 Assignment rules:

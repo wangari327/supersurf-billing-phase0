@@ -43,6 +43,8 @@ Subscriber and service admin pages are read-only. The internal allocation sequen
 
 Subscription mutations must go through audited service-layer functions. Package assignment snapshots package terms at creation time and stores price as integer KES minor units. Subscription identity and snapshot fields are immutable through model save, queryset update, and bulk update paths. Model delete and queryset delete are rejected in application code.
 
+Subscription mutations must acquire row locks in service-first order: service and subscriber, then the current active subscription when present, then the selected package. PostgreSQL CI is the authoritative concurrency check for this behavior; SQLite-only local tests do not prove row-lock blocking semantics.
+
 Subscription information on subscriber pages requires both `subscribers.view_service` and `billing.view_subscription`. Mutations require `subscribers.view_service` plus `billing.add_subscription` or `billing.change_subscription`.
 
 The Django admin is read-only for subscriptions. These are application-level controls, not database-level controls; direct SQL access or compromised database credentials can still alter rows.

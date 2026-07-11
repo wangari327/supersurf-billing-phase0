@@ -69,7 +69,14 @@ def test_readiness_endpoint(client):
 @pytest.mark.django_db
 @override_settings(SUPERSURF_ENVIRONMENT="PRODUCTION", SECRET_KEY="production-test-key")
 def test_missing_production_settings_are_reported():
-    organization = Organization.objects.create()
+    organization = get_or_create_default_organization()
+    Organization.objects.filter(pk=organization.pk).update(
+        domain="",
+        support_email="",
+        billing_email="",
+        noc_email="",
+    )
+    organization.refresh_from_db()
     issues = production_readiness_issues(organization)
     codes = {issue.code for issue in issues}
     assert "missing_domain" in codes
@@ -100,4 +107,3 @@ def test_dashboard_access(client, readonly_user):
     response = client.get(reverse("dashboard"))
     assert response.status_code == 200
     assert b"SuperSurf Billing" in response.content
-

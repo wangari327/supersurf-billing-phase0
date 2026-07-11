@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
+from django.db import close_old_connections, connection
 from django.urls import NoReverseMatch, reverse
 
+import billing.services as billing_services
 from audit.models import AuditEvent
 from billing.models import Plan, Subscription
 from billing.services import assign_package, change_subscription_package, end_subscription
@@ -221,6 +225,145 @@ def test_only_one_active_subscription_per_service_and_duplicate_assignment_rejec
 
 
 @pytest.mark.django_db
+def test_assignment_uses_service_first_locking_path(monkeypatch, seeded_roles):
+    actor = admin_actor(seeded_roles)
+    service = create_test_service()
+    plan = create_test_plan()
+    calls: list[str] = []
+    original_service_lock = billing_services._lock_service_and_subscriber
+    original_active_lock = billing_services._lock_current_active_subscription
+    original_plan_lock = billing_services._lock_selected_plan
+
+    def record_service_lock(service):
+        calls.append("service")
+        return original_service_lock(service)
+
+    def record_active_lock(service):
+        calls.append("subscription")
+        return original_active_lock(service)
+
+    def record_plan_lock(plan):
+        calls.append("plan")
+        return original_plan_lock(plan)
+
+    monkeypatch.setattr(billing_services, "_lock_service_and_subscriber", record_service_lock)
+    monkeypatch.setattr(
+        billing_services,
+        "_lock_current_active_subscription",
+        record_active_lock,
+    )
+    monkeypatch.setattr(billing_services, "_lock_selected_plan", record_plan_lock)
+
+    assign_test_package(service, plan, actor)
+
+    assert calls == ["service", "subscription", "plan"]
+
+
+@pytest.mark.django_db
+def test_package_change_uses_service_first_locking_path(monkeypatch, seeded_roles):
+    actor = admin_actor(seeded_roles)
+    service = create_test_service()
+    first_plan = create_test_plan(name="Lock From")
+    second_plan = create_test_plan(name="Lock To")
+    subscription = assign_test_package(service, first_plan, actor)
+    calls: list[str] = []
+    original_service_lock = billing_services._lock_service_and_subscriber_by_id
+    original_active_lock = billing_services._lock_current_active_subscription
+    original_plan_lock = billing_services._lock_selected_plan
+
+    def record_service_lock(service_id):
+        calls.append("service")
+        return original_service_lock(service_id)
+
+    def record_active_lock(service):
+        calls.append("subscription")
+        return original_active_lock(service)
+
+    def record_plan_lock(plan):
+        calls.append("plan")
+        return original_plan_lock(plan)
+
+    monkeypatch.setattr(
+        billing_services,
+        "_lock_service_and_subscriber_by_id",
+        record_service_lock,
+    )
+    monkeypatch.setattr(
+        billing_services,
+        "_lock_current_active_subscription",
+        record_active_lock,
+    )
+    monkeypatch.setattr(billing_services, "_lock_selected_plan", record_plan_lock)
+
+    change_subscription_package(
+        subscription=subscription,
+        plan=second_plan,
+        reason="Change package",
+        actor=actor,
+    )
+
+    assert calls == ["service", "subscription", "plan"]
+
+
+@pytest.mark.django_db
+def test_subscription_end_uses_service_first_locking_path(monkeypatch, seeded_roles):
+    actor = admin_actor(seeded_roles)
+    subscription = assign_test_package(create_test_service(), create_test_plan(), actor)
+    calls: list[str] = []
+    original_service_lock = billing_services._lock_service_and_subscriber_by_id
+    original_active_lock = billing_services._lock_current_active_subscription
+
+    def record_service_lock(service_id):
+        calls.append("service")
+        return original_service_lock(service_id)
+
+    def record_active_lock(service):
+        calls.append("subscription")
+        return original_active_lock(service)
+
+    monkeypatch.setattr(
+        billing_services,
+        "_lock_service_and_subscriber_by_id",
+        record_service_lock,
+    )
+    monkeypatch.setattr(
+        billing_services,
+        "_lock_current_active_subscription",
+        record_active_lock,
+    )
+
+    end_subscription(subscription=subscription, reason="End package", actor=actor)
+
+    assert calls == ["service", "subscription"]
+
+
+@pytest.mark.django_db
+def test_duplicate_assignment_integrity_conflict_returns_validation_error(
+    monkeypatch,
+    seeded_roles,
+):
+    actor = admin_actor(seeded_roles)
+    service = create_test_service()
+    first_plan = create_test_plan(name="Guard One")
+    second_plan = create_test_plan(name="Guard Two")
+    assign_test_package(service, first_plan, actor)
+
+    monkeypatch.setattr(
+        billing_services,
+        "_lock_current_active_subscription",
+        lambda service: None,
+    )
+
+    with pytest.raises(ValidationError, match="already has an active subscription"):
+        assign_test_package(service, second_plan, actor)
+
+    assert (
+        Subscription.objects.filter(service=service, status=Subscription.STATUS_ACTIVE).count()
+        == 1
+    )
+
+
+@pytest.mark.django_db
 def test_package_change_ends_old_row_and_creates_new_row_with_same_timestamp(seeded_roles):
     actor = admin_actor(seeded_roles)
     service = create_test_service()
@@ -260,13 +403,86 @@ def test_package_change_rejects_same_or_ended_subscription(seeded_roles):
         )
 
     ended = end_subscription(subscription=subscription, reason="End package", actor=actor)
-    with pytest.raises(ValidationError, match="Only active subscriptions can be changed"):
+    with pytest.raises(ValidationError, match="no longer active"):
         change_subscription_package(
             subscription=ended,
             plan=create_test_plan(name="Replacement Package"),
             reason="Ended change",
             actor=actor,
         )
+
+
+@pytest.mark.django_db
+def test_package_change_rejects_replaced_stale_subscription(seeded_roles):
+    actor = admin_actor(seeded_roles)
+    service = create_test_service()
+    first_plan = create_test_plan(name="Stale From")
+    second_plan = create_test_plan(name="Stale To")
+    third_plan = create_test_plan(name="Stale Replacement")
+    old_subscription = assign_test_package(service, first_plan, actor)
+    change_subscription_package(
+        subscription=old_subscription,
+        plan=second_plan,
+        reason="First change",
+        actor=actor,
+    )
+
+    with pytest.raises(ValidationError, match="no longer active"):
+        change_subscription_package(
+            subscription=old_subscription,
+            plan=third_plan,
+            reason="Stale change",
+            actor=actor,
+        )
+
+
+@pytest.mark.django_db
+def test_ending_rejects_replaced_stale_subscription(seeded_roles):
+    actor = admin_actor(seeded_roles)
+    service = create_test_service()
+    first_plan = create_test_plan(name="End Stale From")
+    second_plan = create_test_plan(name="End Stale To")
+    old_subscription = assign_test_package(service, first_plan, actor)
+    change_subscription_package(
+        subscription=old_subscription,
+        plan=second_plan,
+        reason="Replace before end",
+        actor=actor,
+    )
+
+    with pytest.raises(ValidationError, match="no longer active"):
+        end_subscription(subscription=old_subscription, reason="End stale", actor=actor)
+
+
+@pytest.mark.django_db
+def test_failed_package_replacement_rolls_back_old_subscription_end(monkeypatch, seeded_roles):
+    actor = admin_actor(seeded_roles)
+    service = create_test_service()
+    first_plan = create_test_plan(name="Rollback From")
+    second_plan = create_test_plan(name="Rollback To")
+    subscription = assign_test_package(service, first_plan, actor)
+
+    def fail_new_subscription(subscription):
+        raise ValidationError("Replacement creation failed.")
+
+    monkeypatch.setattr(billing_services, "_save_new_subscription", fail_new_subscription)
+
+    with pytest.raises(ValidationError, match="Replacement creation failed"):
+        change_subscription_package(
+            subscription=subscription,
+            plan=second_plan,
+            reason="Change package",
+            actor=actor,
+        )
+
+    subscription.refresh_from_db()
+    assert subscription.status == Subscription.STATUS_ACTIVE
+    assert subscription.ended_at is None
+    assert (
+        Subscription.objects.filter(service=service, status=Subscription.STATUS_ACTIVE).count()
+        == 1
+    )
+    assert Subscription.objects.filter(service=service).count() == 1
 
 
 @pytest.mark.django_db
@@ -285,7 +501,7 @@ def test_ending_active_subscription_and_new_assignment_history(seeded_roles):
     assert ended.ended_at is not None
     assert service.is_active is True
     assert subscriber.is_active is True
-    with pytest.raises(ValidationError, match="Only active subscriptions can be ended"):
+    with pytest.raises(ValidationError, match="no longer active"):
         end_subscription(subscription=ended, reason="End again", actor=actor)
 
     new_subscription = assign_test_package(
@@ -360,6 +576,103 @@ def test_subscription_mutation_routes_are_post_only(client, seeded_roles):
         == 405
     )
     assert client.get(reverse("subscription_end", args=[subscription.pk])).status_code == 405
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_postgresql_assignments_leave_one_active_subscription(seeded_roles):
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL row-locking behavior is verified in CI.")
+    actor = admin_actor(seeded_roles)
+    service = create_test_service()
+    first_plan = create_test_plan(name="Concurrent Assign One")
+    second_plan = create_test_plan(name="Concurrent Assign Two")
+    barrier = Barrier(2)
+
+    def worker(plan_id):
+        close_old_connections()
+        try:
+            barrier.wait(timeout=10)
+            subscription = assign_package(
+                service=Service.objects.get(pk=service.pk),
+                plan=Plan.objects.get(pk=plan_id),
+                reason="Concurrent assignment",
+                actor=User.objects.get(pk=actor.pk),
+            )
+            return ("created", str(subscription.pk))
+        except ValidationError as exc:
+            return ("validation", str(exc))
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(worker, [first_plan.pk, second_plan.pk]))
+
+    assert [status for status, _message in results].count("created") == 1
+    assert [status for status, _message in results].count("validation") == 1
+    assert any("already has an active subscription" in message for _status, message in results)
+    assert (
+        Subscription.objects.filter(service=service, status=Subscription.STATUS_ACTIVE).count()
+        == 1
+    )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_postgresql_change_and_end_leave_consistent_history(seeded_roles):
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL row-locking behavior is verified in CI.")
+    actor = admin_actor(seeded_roles)
+    service = create_test_service()
+    subscription = assign_test_package(service, create_test_plan(name="Concurrent Base"), actor)
+    replacement_plan = create_test_plan(name="Concurrent Replacement")
+    barrier = Barrier(2)
+
+    def change_worker():
+        close_old_connections()
+        try:
+            barrier.wait(timeout=10)
+            new_subscription = change_subscription_package(
+                subscription=Subscription.objects.get(pk=subscription.pk),
+                plan=Plan.objects.get(pk=replacement_plan.pk),
+                reason="Concurrent change",
+                actor=User.objects.get(pk=actor.pk),
+            )
+            return ("changed", str(new_subscription.pk))
+        except ValidationError as exc:
+            return ("validation", str(exc))
+        finally:
+            close_old_connections()
+
+    def end_worker():
+        close_old_connections()
+        try:
+            barrier.wait(timeout=10)
+            ended_subscription = end_subscription(
+                subscription=Subscription.objects.get(pk=subscription.pk),
+                reason="Concurrent end",
+                actor=User.objects.get(pk=actor.pk),
+            )
+            return ("ended", str(ended_subscription.pk))
+        except ValidationError as exc:
+            return ("validation", str(exc))
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(change_worker), executor.submit(end_worker)]
+        results = [future.result() for future in futures]
+
+    successful_statuses = [status for status, _message in results if status != "validation"]
+    validation_messages = [message for status, message in results if status == "validation"]
+    subscription.refresh_from_db()
+
+    assert len(successful_statuses) == 1
+    assert len(validation_messages) == 1
+    assert "no longer active" in validation_messages[0]
+    assert subscription.status == Subscription.STATUS_ENDED
+    assert (
+        Subscription.objects.filter(service=service, status=Subscription.STATUS_ACTIVE).count()
+        <= 1
+    )
 
 
 @pytest.mark.django_db

@@ -23,7 +23,7 @@ These questions block production-ready implementation decisions but do not block
 - What is the desired PPPoE username format?
 - May one subscriber have multiple services?
 - What is the RouterOS API certificate plan?
-- What is the RADIUS shared-secret plan?
+- What is the per-NAS RADIUS shared-secret or secret-reference plan?
 - Which router or CHR lab will be used for testing?
 - What NAS-Identifier and NAS-IP-Address conventions should SuperSurf use?
 - What plan rate-limit attributes should be generated for RouterOS?
@@ -47,4 +47,3 @@ Until supplied:
 - Use secure environment variables.
 - Block production activation where required.
 - Do not invent replacements.
-

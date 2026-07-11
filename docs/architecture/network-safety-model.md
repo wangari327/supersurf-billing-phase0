@@ -8,6 +8,7 @@
 - Router writes must be allowlisted.
 - Never automatically touch live SuperSurf L009 during Phase 0.
 - Never execute generated migration scripts automatically.
+- Each NAS/router must have its own credential and RADIUS secret reference.
 
 ## Protected Router Areas
 
@@ -45,6 +46,21 @@ Dry-run mode must:
 - Be visible in UI and audit events
 - Block production activation until Owner explicitly disables it for a configured integration
 
+## RADIUS Secrets
+
+Do not use one global `RADIUS_SHARED_SECRET`.
+
+Every NAS/router must record:
+
+- Its own shared secret or secret reference
+- NAS-Identifier
+- NAS-IP-Address or private management address
+- Enabled state
+- Environment: lab or production
+- Last credential rotation time
+
+Secrets must be encrypted or loaded through a secret provider. Never display full RADIUS secrets after initial entry.
+
 ## Lab Migration Plan
 
 Later phases must test on CHR or a spare-router lab before production:
@@ -65,4 +81,3 @@ Later phases must test on CHR or a spare-router lab before production:
 - Customer credentials
 - CPE configuration
 - Support procedures
-

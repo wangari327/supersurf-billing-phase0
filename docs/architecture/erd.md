@@ -1,10 +1,11 @@
 # Entity-Relationship Model
 
-This is a Phase 0 logical model, not a production migration.
+This is a Phase 0.5 logical model, not a production migration.
 
 ```mermaid
 erDiagram
     ORGANIZATION ||--o{ ORGANIZATION_SETTING : owns
+    ORGANIZATION ||--o{ PAYMENT_PROVIDER_PROFILE : configures
     ORGANIZATION ||--o{ STAFF_USER : employs
     STAFF_USER ||--o{ AUDIT_EVENT : causes
 
@@ -24,15 +25,21 @@ erDiagram
 
     SUBSCRIBER ||--|| WALLET : owns
     WALLET ||--o{ LEDGER_ENTRY : records
-    PAYMENT ||--o{ LEDGER_ENTRY : funds
-    PAYMENT ||--o{ RECEIPT : receipts
     INVOICE ||--o{ LEDGER_ENTRY : settled_by
 
-    MPESA_CALLBACK ||--o| PAYMENT : creates
-    MPESA_CALLBACK ||--o| UNMATCHED_PAYMENT : creates
+    PAYMENT_PROVIDER_PROFILE ||--o{ WEBHOOK_EVENT : receives
+    PAYMENT_PROVIDER_PROFILE ||--o{ PAYMENT : identifies
+    WEBHOOK_EVENT ||--o| PAYMENT : records
+    PAYMENT ||--o{ PAYMENT_ALLOCATION : allocates
+    PAYMENT ||--o| UNMATCHED_PAYMENT_CASE : may_open
+    PAYMENT ||--o| RECONCILIATION_ITEM : reconciles
+    PAYMENT ||--o{ RECEIPT : receipts
+    PAYMENT_ALLOCATION ||--o{ LEDGER_ENTRY : posts
+    PAYMENT_ALLOCATION ||--o| PAYMENT_ALLOCATION : reverses
+    PAYMENT_ALLOCATION }o--o| AUDIT_EVENT : audited_by
+
     MPESA_STATEMENT_IMPORT ||--o{ MPESA_STATEMENT_ROW : contains
     MPESA_STATEMENT_ROW ||--o| RECONCILIATION_ITEM : reconciles
-    PAYMENT ||--o| RECONCILIATION_ITEM : reconciles
 
     NAS_ROUTER ||--o{ NETWORK_SESSION : reports
     NAS_ROUTER ||--o{ PROVISIONING_JOB : executes
@@ -49,6 +56,18 @@ erDiagram
         string locale
         string timezone
         string currency
+    }
+    PAYMENT_PROVIDER_PROFILE {
+        uuid id
+        uuid organization_id
+        string provider
+        string product_type
+        string environment
+        string external_identifier
+        bool enabled
+        string credential_reference
+        json callback_configuration
+        json reconciliation_configuration
     }
     SUBSCRIBER {
         uuid id
@@ -69,26 +88,65 @@ erDiagram
         string name
         bigint price_minor
         string currency
-        int duration_days
+        int duration_value
+        string duration_unit
+        string renewal_anchor_policy
+        int grace_duration_value
+        string grace_duration_unit
+        string expiry_timezone
         string radius_profile
     }
     SUBSCRIPTION {
         uuid id
         uuid service_id
         uuid plan_id
-        datetime starts_at
-        datetime expires_at
-        datetime grace_until
+        datetime starts_at_utc
+        datetime expires_at_utc
+        datetime grace_until_utc
         string status
+    }
+    WEBHOOK_EVENT {
+        uuid id
+        uuid provider_profile_id
+        string event_type
+        string external_event_id
+        json raw_payload
+        string processing_status
+        datetime received_at
     }
     PAYMENT {
         uuid id
-        string provider
+        uuid provider_profile_id
         string provider_transaction_id
         bigint amount_minor
         string currency
         string channel
-        string matching_status
+        string lifecycle
+        datetime received_at
+    }
+    PAYMENT_ALLOCATION {
+        uuid id
+        uuid payment_id
+        uuid subscriber_id
+        uuid wallet_id
+        uuid invoice_id
+        uuid renewal_charge_id
+        bigint amount_minor
+        string allocation_type
+        uuid allocated_by_id
+        string allocated_by_type
+        string idempotency_key
+        datetime allocated_at
+        uuid reverses_allocation_id
+        uuid audit_event_id
+    }
+    UNMATCHED_PAYMENT_CASE {
+        uuid id
+        uuid payment_id
+        string reason
+        string status
+        datetime opened_at
+        datetime resolved_at
     }
     LEDGER_ENTRY {
         uuid id
@@ -98,6 +156,17 @@ erDiagram
         string currency
         string entry_type
         datetime posted_at
+    }
+    NAS_ROUTER {
+        uuid id
+        string name
+        string environment
+        string nas_identifier
+        string nas_ip_address
+        string management_address
+        string secret_reference
+        bool enabled
+        datetime last_credential_rotation_at
     }
     PROVISIONING_JOB {
         uuid id
@@ -118,12 +187,35 @@ erDiagram
     }
 ```
 
-## Model Notes
+## Payment Model Notes
 
-- `Payment.provider_transaction_id` must be unique per provider.
-- Ledger entries are append-only.
-- Reversals create compensating entries.
-- `UnmatchedPayment` keeps a link to the original callback and can later be manually resolved.
-- `Service` exists separately from `Subscriber` to allow future multi-service customers without redesigning payments and network provisioning.
+- Every valid provider transaction creates one canonical `Payment`, even when it cannot yet be matched to a subscriber.
+- `UnmatchedPaymentCase` is not an alternative to `Payment`; it is an optional case opened for a canonical payment.
+- `PaymentAllocation` records allocation of payment value to a subscriber, wallet, invoice, or renewal charge.
+- Allocations must not be mutated silently. Corrections require reversal or compensating allocation records linked through `reverses_allocation_id`.
+- Payment lifecycle values should include `received`, `unmatched`, `partially_allocated`, `allocated`, `reversed`, `refunded_externally`, and `rejected` only when no valid financial transaction exists.
+- Provider transaction identifiers are unique within a composite boundary such as `(provider_profile_id, environment, provider_transaction_id)`, not globally.
+- A sandbox transaction must not collide with a production transaction.
+
+## Provider Profile Notes
+
+`PaymentProviderProfile` separates Paybill and Till products, sandbox and production environments, shortcode or Till identifier, enabled state, credential reference, callback configuration, and reconciliation configuration.
+
+Credentials must not be stored directly in ordinary display fields. Store only encrypted secrets or secret-provider references.
+
+## Plan Duration Notes
+
+- Use `duration_value` and `duration_unit`, where unit can be `days`, `weeks`, or `calendar_months`.
+- Thirty days is not always the same as one calendar month.
+- Calendar-month renewal must define a renewal anchor policy and handle month-end dates.
+- Persist timestamps in UTC.
+- Perform business expiry and grace calculations in Africa/Nairobi.
+
+## Network Notes
+
+- Each NAS/router has its own shared secret or secret reference.
+- Each NAS/router records NAS-Identifier, NAS-IP-Address or private management address, enabled state, lab or production environment, and last credential rotation time.
+- Never display full RADIUS secrets after initial entry.
+- RADIUS secrets must be encrypted or loaded through a secret provider.
 - RADIUS tables may include official FreeRADIUS tables alongside SuperSurf-owned service and provisioning tables.
 

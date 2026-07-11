@@ -42,3 +42,20 @@ Decision: use Django templates, HTMX, and Tailwind; avoid React/Next/Vue/Angular
 
 Reason: the operator dashboard needs speed, maintainability, RBAC integration, and low JavaScript, not a large frontend application.
 
+## D008: Keep Phase 1 Foundation Lean
+
+Decision: Phase 1 creates only `core`, `users`, and `audit` apps. It must not create payment, subscriber, billing, RADIUS, RouterOS, wallet, ledger, or provisioning models.
+
+Reason: the owner approved a foundation phase only. Keeping later domains out of Phase 1 prevents empty scaffolding and premature migrations.
+
+## D009: Use Canonical Payment Plus Allocation Model
+
+Decision: every valid provider transaction creates one canonical `Payment`; matching and value application are represented by `PaymentAllocation`, and unresolved matching opens an optional `UnmatchedPaymentCase`.
+
+Reason: unmatched payments are still valid financial transactions. Treating them as an alternative to `Payment` would make reconciliation, reversals, idempotency, and audit history harder to reason about.
+
+## D010: Scope Provider Transaction Uniqueness By Profile And Environment
+
+Decision: provider transaction identifiers must be unique within a composite boundary such as provider profile, environment, and provider transaction identifier.
+
+Reason: sandbox and production transactions must not collide, and Paybill and Till products may have independent identifier spaces.

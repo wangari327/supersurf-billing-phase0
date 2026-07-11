@@ -14,11 +14,6 @@ This is a candidate list, not an installed lockfile.
 - django-environ 0.14.0 target
 - django-axes 8.3.1 target
 - django-otp 1.7.0 target
-- phonenumbers 9.0.34 target
-- django-phonenumber-field 8.4.0 target
-- Babel 2.18.0 target
-- httpx 0.28.1 target
-- tenacity 9.1.4 target
 - structlog 26.1.0 target
 - django-structlog 10.1.0 target
 - pytest 9.1.1 target
@@ -28,6 +23,8 @@ This is a candidate list, not an installed lockfile.
 - mypy 2.2.0 target
 - Playwright 1.61.0 target
 - Caddy 2 official image, pinned
+
+Phase 0.5 correction: this list is a research shortlist. Phase 1 implementation should install only what is needed for the lean foundation. Do not install DRF, payment, RouterOS, RADIUS, phone-number, money, accounting, ledger, reconciliation, or statement-import dependencies until the relevant later phase requires them.
 
 ## Evaluate In Phase 1 Spikes
 
@@ -54,4 +51,3 @@ This is a candidate list, not an installed lockfile.
 - mpesa-sdk 1.0.7
 - django-freeradius 0.1
 - Full accounting packages as primary ledger implementation
-

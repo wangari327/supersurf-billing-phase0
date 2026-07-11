@@ -12,6 +12,23 @@ Accessed on 2026-07-11 unless otherwise noted.
 
 Phase 0 decision: implement Daraja as a thin provider behind `MpesaProvider`, `PaybillProvider`, and `TillProvider`. Do not adopt a stale wrapper without sandbox proof.
 
+### Daraja Implementation Gate
+
+The public Daraja catalogue does not provide enough evidence to implement the production callback contract without authenticated product documentation and sandbox verification.
+
+Implementation must not assume:
+
+- Callbacks are cryptographically signed.
+- Safaricom callback source IPs are fixed.
+- Source-IP allowlisting is sufficient authentication.
+- Paybill and Till callbacks have identical structures.
+- Till always provides payer MSISDN.
+- Till always provides an account reference.
+- Every product supports validation and confirmation identically.
+- Transaction query is enabled for every product.
+
+No M-PESA implementation may begin until `docs/research/mpesa-sandbox-evidence-checklist.md` is completed for SuperSurf's actual sandbox products.
+
 ## MikroTik RouterOS
 
 | Source | Applicable capability | Phase 0 finding | Ambiguity or required lab test |
@@ -20,7 +37,7 @@ Phase 0 decision: implement Daraja as a thin provider behind `MpesaProvider`, `P
 | https://help.mikrotik.com/docs/display/ROS/RADIUS | RouterOS RADIUS | Official RADIUS behavior for RouterOS services, including PPP integration and accounting settings. | Verify PPPoE attributes, interim updates, disconnect behavior, and NAS-Identifier plan in lab. |
 | https://help.mikrotik.com/docs/display/ROS/PPP+AAA | PPP AAA with RADIUS | Relevant for PPPoE user authentication through RADIUS. | Confirm exact rate-limit attributes and service profile mapping. |
 
-Phase 0 decision: use a dry-run `RouterOSAdapter` first. Real API-TLS writes require lab validation and Owner approval in later phases.
+Phase 0 decision: use a dry-run `RouterOSAdapter` first. Real API-TLS writes require lab validation and Owner approval in later phases. RouterOS and FreeRADIUS designs must use per-NAS secret references rather than one global RADIUS shared secret.
 
 ## FreeRADIUS
 
@@ -61,4 +78,3 @@ Phase 0 decision: use official FreeRADIUS SQL integration patterns and keep Supe
 | https://alpinejs.dev/ | Alpine.js | Use only for small local interactions where HTMX and CSS are insufficient. |
 | https://caddyserver.com/docs/automatic-https | Caddy automatic HTTPS | Good fit for a lightweight reverse proxy with automatic HTTPS. |
 | https://hub.docker.com/_/caddy | Official Caddy container image | Candidate deployment component after pinning. |
-

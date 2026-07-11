@@ -1,0 +1,79 @@
+services:
+  web:
+    build: .
+    command: uv run --no-dev python manage.py runserver 0.0.0.0:8000
+    environment:
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,web
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: dev-only-change-me
+      DATABASE_URL: postgres://supersurf:supersurf@postgres:5432/supersurf
+      BROKER_URL: redis://broker:6379/0
+      SUPERSURF_ENVIRONMENT: DEVELOPMENT
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      broker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "manage.py", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    build: .
+    command: uv run --no-dev celery -A supersurf worker --loglevel=INFO
+    environment:
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,web
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: dev-only-change-me
+      DATABASE_URL: postgres://supersurf:supersurf@postgres:5432/supersurf
+      BROKER_URL: redis://broker:6379/0
+      SUPERSURF_ENVIRONMENT: DEVELOPMENT
+    depends_on:
+      postgres:
+        condition: service_healthy
+      broker:
+        condition: service_healthy
+
+  scheduler:
+    build: .
+    command: uv run --no-dev celery -A supersurf beat --loglevel=INFO
+    environment:
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,web
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: dev-only-change-me
+      DATABASE_URL: postgres://supersurf:supersurf@postgres:5432/supersurf
+      BROKER_URL: redis://broker:6379/0
+      SUPERSURF_ENVIRONMENT: DEVELOPMENT
+    depends_on:
+      broker:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: supersurf
+      POSTGRES_USER: supersurf
+      POSTGRES_PASSWORD: supersurf
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supersurf -d supersurf"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  broker:
+    image: valkey/valkey:8-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

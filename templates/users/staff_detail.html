@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Staff Detail{% endblock %}
+
+{% block content %}
+<section class="max-w-3xl">
+  <div class="flex items-center justify-between gap-3">
+    <h1 class="text-2xl font-semibold">{{ staff_user }}</h1>
+    {% if perms.users.assign_roles %}
+      <a class="btn" href="{% url 'assign_roles' staff_user.pk %}">Assign roles</a>
+    {% endif %}
+  </div>
+  <dl class="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm sm:grid-cols-2">
+    <div><dt class="font-medium text-slate-600">Username</dt><dd>{{ staff_user.username }}</dd></div>
+    <div><dt class="font-medium text-slate-600">Email</dt><dd>{{ staff_user.email|default:"Not configured" }}</dd></div>
+    <div><dt class="font-medium text-slate-600">Roles</dt><dd>{{ staff_user.role_names|join:", "|default:"None" }}</dd></div>
+    <div><dt class="font-medium text-slate-600">Status</dt><dd>{{ staff_user.is_active|yesno:"Active,Inactive" }}</dd></div>
+  </dl>
+</section>
+{% endblock %}
+

@@ -1,0 +1,50 @@
+{% load static %}
+<!doctype html>
+<html lang="en-KE">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}SuperSurf Billing{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  </head>
+  <body class="min-h-screen">
+    <header class="border-b border-slate-200 bg-white">
+      <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <a href="{% url 'dashboard' %}" class="text-lg font-semibold text-slate-950 no-underline">SuperSurf Billing</a>
+        <span class="badge {{ SUPERSURF_ENVIRONMENT_CLASSES }}">{{ SUPERSURF_ENVIRONMENT }}</span>
+        {% if request.user.is_authenticated %}
+          <nav class="flex flex-wrap items-center gap-2 text-sm" aria-label="Primary">
+            <a class="btn" href="{% url 'dashboard' %}">Dashboard</a>
+            {% if perms.core.change_organization %}
+              <a class="btn" href="{% url 'organization_settings' %}">SuperSurf Settings</a>
+            {% endif %}
+            {% if perms.users.view_user %}
+              <a class="btn" href="{% url 'staff_list' %}">Staff</a>
+            {% endif %}
+            {% if perms.audit.view_auditevent %}
+              <a class="btn" href="{% url 'audit_log' %}">Audit Log</a>
+            {% endif %}
+            <a class="btn" href="{% url 'system_health' %}">System Health</a>
+            <a class="btn" href="{% url 'password_change' %}">Password</a>
+            <form method="post" action="{% url 'logout' %}" class="inline">
+              {% csrf_token %}
+              <button class="btn" type="submit">Logout</button>
+            </form>
+          </nav>
+        {% endif %}
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-7xl px-4 py-6">
+      {% if messages %}
+        <div class="mb-4 space-y-2">
+          {% for message in messages %}
+            <div class="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
+

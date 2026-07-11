@@ -1,0 +1,52 @@
+[project]
+name = "supersurf-billing"
+version = "0.1.0"
+description = "SuperSurf Billing Phase 1 lean Django foundation"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "celery[redis]==5.6.3",
+    "django==5.2.16",
+    "django-axes==8.3.1",
+    "django-htmx==1.27.0",
+    "django-otp==1.7.0",
+    "psycopg[binary]==3.3.4",
+    "redis==6.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==2.2.0",
+    "pip-audit==2.10.1",
+    "pip-licenses==5.5.5",
+    "playwright==1.61.0",
+    "pytest==9.1.1",
+    "pytest-django==4.12.0",
+    "ruff==0.15.21",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "supersurf.settings"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+exclude = ["**/migrations/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DJ"]
+ignore = ["DJ008"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["supersurf", "core", "users", "audit"]
+exclude = "migrations"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Assign Roles{% endblock %}
+
+{% block content %}
+<section class="max-w-2xl">
+  <h1 class="text-2xl font-semibold">Assign roles</h1>
+  <p class="mt-1 text-sm text-slate-600">{{ staff_user.username }}</p>
+  <form method="post" class="mt-6 space-y-4">
+    {% csrf_token %}
+    <div class="card p-4">
+      {{ form.roles }}
+    </div>
+    <div>
+      <label class="label" for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>
+      {{ form.reason }}
+      {% for error in form.reason.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+    </div>
+    <button class="btn btn-primary" type="submit">Save roles</button>
+  </form>
+</section>
+{% endblock %}
+

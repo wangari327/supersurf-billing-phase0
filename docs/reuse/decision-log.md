@@ -59,3 +59,27 @@ Reason: unmatched payments are still valid financial transactions. Treating them
 Decision: provider transaction identifiers must be unique within a composite boundary such as provider profile, environment, and provider transaction identifier.
 
 Reason: sandbox and production transactions must not collide, and Paybill and Till products may have independent identifier spaces.
+
+## D011: Use Django Groups And Permissions For Phase 1 RBAC
+
+Decision: use Django's built-in Groups and Permissions for Phase 1 roles. Do not install django-guardian, rules, or django-role-permissions.
+
+Reason: Phase 1 permissions are global staff and settings permissions. Object-level authorization is not required until later subscriber, payment, or network domains exist.
+
+## D012: Implement Explicit SuperSurf AuditEvent
+
+Decision: create a project-owned append-only `AuditEvent` model and service instead of installing django-simple-history, django-auditlog, or django-reversion in Phase 1.
+
+Reason: Phase 1 needs explicit security and settings audit events with redaction. Generic history packages would add dependency weight before business-domain models exist.
+
+## D013: Use redis-py 6.4.0 With Valkey Target
+
+Decision: select redis-py 6.4.0 for Celery's Redis protocol transport and use a Valkey 8 container in Compose.
+
+Reason: Celery/Kombu 5.6.3 rejects redis-py 8.x through its dependency constraints. redis-py 6.4.0 resolves cleanly and speaks the Redis protocol needed by Valkey.
+
+## D014: Keep Caddy Optional In Phase 1
+
+Decision: include Caddy only in an optional Compose profile.
+
+Reason: ordinary localhost development should not require a public domain or TLS reverse proxy.

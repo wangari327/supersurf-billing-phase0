@@ -4,9 +4,9 @@ This repository is for SuperSurf Billing, a Kenya-first ISP billing and subscrib
 
 ## Current Phase
 
-This bundle represents Phase 0 only: product specification, architecture, threat modeling, entity modeling, official documentation research, and open-source reconnaissance.
+This repository has completed Phase 0, Phase 0.5, and Phase 1 foundation work.
 
-Do not scaffold the production Django application, create production database migrations, connect to live routers, or store production credentials until Phase 1 is explicitly approved by the owner.
+Do not begin Phase 2, create payment/subscriber/network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
 
 ## Brand Rules
 
@@ -61,7 +61,7 @@ Before writing more than roughly 100 lines for generic technical capability, doc
 
 ## Phase Gates
 
-At the end of every implementation phase after Phase 0:
+At the end of every implementation phase:
 
 - Run automated tests.
 - Run linters.
@@ -77,4 +77,3 @@ At the end of every implementation phase after Phase 0:
 - Stop for review.
 
 Never continue automatically to the next phase.
-

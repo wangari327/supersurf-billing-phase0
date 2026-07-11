@@ -2,9 +2,25 @@
 
 ## Supported Status
 
-This is a Phase 0 documentation bundle. No production application runtime is included yet.
+This repository includes the Phase 1 foundation runtime. It is not production-ready for payments, billing, subscriber management, RADIUS, or RouterOS operations.
 
 Security requirements in this document are binding for later phases unless explicitly superseded by a reviewed ADR.
+
+## Implemented In Phase 1
+
+- Custom Django staff user model
+- Django Groups and Permissions for the approved roles
+- Login, logout, password change, and session expiry
+- django-axes login throttling
+- django-otp installed for optional TOTP foundation
+- Append-only application-level `AuditEvent`
+- Audit redaction helper
+- Secret redaction logging filter
+- Health and readiness endpoints
+- Environment banner
+- Production deployment checks
+- Local secret scanning script
+- GitHub Actions for tests, checks, secret scanning, vulnerability scanning, and licence report
 
 ## Sensitive Data
 
@@ -54,6 +70,8 @@ M-PESA callbacks must be persisted before business processing. Duplicate callbac
 
 Till payments must not be matched by amount alone.
 
+M-PESA implementation has not begun. It is blocked until sandbox evidence is collected in `docs/research/mpesa-sandbox-evidence-checklist.md`.
+
 ## Network Safety
 
 Router writes must default to dry-run. Any real RouterOS action must be:
@@ -68,4 +86,3 @@ Router writes must default to dry-run. Any real RouterOS action must be:
 ## Reporting A Vulnerability
 
 During early development, report suspected vulnerabilities to the SuperSurf owner through the private project channel. Do not include secrets or full identity numbers in reports.
-

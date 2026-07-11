@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Staff - SuperSurf Billing{% endblock %}
+
+{% block content %}
+<section>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h1 class="text-2xl font-semibold">Staff</h1>
+    <form method="get" class="flex gap-2">
+      {{ form.q }}
+      <button class="btn" type="submit">Search</button>
+    </form>
+  </div>
+  <div class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <thead class="bg-slate-50">
+        <tr>
+          <th class="px-4 py-3 text-left">Username</th>
+          <th class="px-4 py-3 text-left">Email</th>
+          <th class="px-4 py-3 text-left">Roles</th>
+          <th class="px-4 py-3 text-left">Status</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-200">
+        {% for staff_user in page %}
+          <tr>
+            <td class="px-4 py-3"><a href="{% url 'staff_detail' staff_user.pk %}">{{ staff_user.username }}</a></td>
+            <td class="px-4 py-3">{{ staff_user.email|default:"Not configured" }}</td>
+            <td class="px-4 py-3">{{ staff_user.role_names|join:", "|default:"None" }}</td>
+            <td class="px-4 py-3">{% if staff_user.is_active %}<span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Active</span>{% else %}<span class="badge bg-slate-50 text-slate-700 ring-slate-300">Inactive</span>{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td class="px-4 py-6 text-slate-600" colspan="4">No staff matched the current search.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page.paginator.num_pages > 1 %}
+    <p class="mt-3 text-sm text-slate-600">Page {{ page.number }} of {{ page.paginator.num_pages }}</p>
+  {% endif %}
+</section>
+{% endblock %}
+

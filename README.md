@@ -2,9 +2,11 @@
 
 SuperSurf Billing is a planned Kenya-first ISP billing and subscriber-management platform for SuperSurf.
 
-This repository bundle contains Phase 0 only. It is intentionally documentation-first and does not include a production Django scaffold, production database migrations, live router integration, production credentials, or generated RouterOS scripts.
+This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, and the Phase 1 lean Django foundation.
 
-## Phase 0 Deliverables
+Phase 1 deliberately includes only `core`, `users`, and `audit` Django apps. It does not include M-PESA implementation, subscriber billing, wallets, ledger transactions, FreeRADIUS provisioning, PPPoE, RouterOS integration, or live network actions.
+
+## Current Deliverables
 
 - SuperSurf product and brand contract
 - Kenya-specific defaults and subscriber data conventions
@@ -22,29 +24,49 @@ This repository bundle contains Phase 0 only. It is intentionally documentation-
 - ADRs for the initial technical direction
 - Phase 1 implementation checklist
 - Genuine blocking questions
+- Django 5.2.16 LTS foundation
+- SuperSurf and Kenya default seed migration
+- Custom user model
+- Staff roles using Django Groups and Permissions
+- Append-only application audit model
+- Operator shell pages
+- Health and readiness endpoints
+- Minimal Celery broker/worker wiring
+- Docker Compose definitions for web, PostgreSQL, Valkey broker, worker, and scheduler
+- GitHub Actions CI
 
-## Phase 0 Boundary
+## Phase Boundary
 
-Phase 0 stops before implementation. Do not create production application code from this bundle without explicit approval to begin Phase 1.
+Phase 1 is complete as a foundation. Do not begin Phase 2 without explicit owner approval.
 
-Allowed Phase 0 artifacts:
+Disallowed in Phase 1 and still absent:
 
-- Markdown documentation
-- Architecture diagrams
-- Research notes
-- Reuse decisions
-- ADRs
-- Optional disposable spikes under `spikes/`
-
-Disallowed in Phase 0:
-
-- Production Django application scaffold
-- Production database migrations
-- Production M-PESA credentials
-- Production router credentials
-- Live SuperSurf L009 access
-- Automatically executed RouterOS scripts
+- M-PESA implementation
+- Subscriber billing
+- Wallets
+- Ledger transactions
+- FreeRADIUS provisioning
+- PPPoE
+- RouterOS integration
+- Live network actions
+- Production credentials
 - Fake production domains, emails, Paybill numbers, Till numbers, or credentials
+
+## Local Setup
+
+Recommended setup uses `uv`:
+
+```powershell
+uv sync
+npm ci --include=optional
+npm run build:css
+uv run python manage.py migrate
+uv run python manage.py seed_roles
+uv run python manage.py create_first_owner --username owner --email ""
+uv run python manage.py runserver
+```
+
+If `uv` is not installed, see `docs/development/dependency-management.md`.
 
 ## Review Path
 
@@ -57,6 +79,8 @@ Start with:
 5. `docs/architecture/threat-model.md`
 6. `docs/implementation/phase-1-checklist.md`
 7. `docs/research/blocking-questions.md`
+8. `docs/development/local-setup.md`
+9. `docs/operations/first-owner.md`
 
 ## Production Readiness
 

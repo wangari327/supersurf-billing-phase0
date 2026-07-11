@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}SuperSurf Settings{% endblock %}
+
+{% block content %}
+<section>
+  <h1 class="text-2xl font-semibold">SuperSurf Settings</h1>
+  <p class="mt-1 text-sm text-slate-600">Unset production values remain blank and marked by empty fields.</p>
+
+  <form method="post" class="mt-6 grid gap-6 lg:grid-cols-2">
+    {% csrf_token %}
+    <div class="card p-4">
+      <h2 class="text-lg font-semibold">Organization</h2>
+      <div class="mt-4 grid gap-4">
+        {% for field in organization_form %}
+          <div>
+            <label class="label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% for error in field.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card p-4">
+      <h2 class="text-lg font-semibold">Branding</h2>
+      <div class="mt-4 grid gap-4">
+        {% for field in branding_form %}
+          <div>
+            <label class="label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% for error in field.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="lg:col-span-2">
+      <button class="btn btn-primary" type="submit">Save settings</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+

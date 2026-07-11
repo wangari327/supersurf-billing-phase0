@@ -6,6 +6,7 @@
 # Python
 __pycache__/
 *.py[cod]
+db.sqlite3
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -17,6 +18,9 @@ htmlcov/
 venv/
 env/
 
+# Node
+node_modules/
+
 # OS/editor
 .DS_Store
 Thumbs.db
@@ -26,4 +30,4 @@ Thumbs.db
 # Temporary outputs
 tmp/
 *.log
-
+staticfiles/

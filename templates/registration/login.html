@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Login - SuperSurf Billing{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-md">
+  <div class="card p-6">
+    <h1 class="text-2xl font-semibold text-slate-950">SuperSurf Billing</h1>
+    <p class="mt-1 text-sm text-slate-600">Staff sign in</p>
+    {% if form.errors %}
+      <div class="mt-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+        Sign in failed. Check your credentials or wait if the account is temporarily locked.
+      </div>
+    {% endif %}
+    <form method="post" class="mt-6 space-y-4">
+      {% csrf_token %}
+      <div>
+        <label class="label" for="{{ form.username.id_for_label }}">Username</label>
+        {{ form.username }}
+      </div>
+      <div>
+        <label class="label" for="{{ form.password.id_for_label }}">Password</label>
+        {{ form.password }}
+      </div>
+      <button class="btn btn-primary w-full" type="submit">Sign in</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+

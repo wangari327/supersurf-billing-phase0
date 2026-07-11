@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.28"
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci --include=optional
+
+      - name: Build CSS
+        run: npm run build:css
+
+      - name: Install Playwright Chromium
+        run: uv run playwright install chromium
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: mypy
+        run: uv run mypy supersurf core users audit
+
+      - name: Django checks
+        run: uv run python manage.py check
+
+      - name: Django deployment checks
+        env:
+          SUPERSURF_ENVIRONMENT: PRODUCTION
+          DJANGO_DEBUG: "false"
+          DJANGO_SECRET_KEY: prod-check-9a7bc25f-df43-43bb-b84e-1cf3ee701e6b-Xq84rL9mVz27
+          DJANGO_ALLOWED_HOSTS: supersurf.localhost
+          DJANGO_CSRF_TRUSTED_ORIGINS: https://supersurf.localhost
+        run: uv run python manage.py check --deploy --fail-level WARNING
+
+      - name: Tests
+        env:
+          CELERY_TASK_ALWAYS_EAGER: "true"
+        run: uv run pytest
+
+      - name: Secret scan
+        run: uv run python scripts/scan_secrets.py
+
+      - name: Dependency vulnerability scan
+        run: uv run pip-audit
+
+      - name: Licence report
+        run: uv run pip-licenses --format=markdown --with-system
+

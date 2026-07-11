@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}System Health{% endblock %}
+
+{% block content %}
+<section>
+  <h1 class="text-2xl font-semibold">System Health</h1>
+  <div class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <tbody class="divide-y divide-slate-200">
+        <tr><th class="px-4 py-3 text-left">Database</th><td class="px-4 py-3">{{ database_engine }}</td></tr>
+        <tr><th class="px-4 py-3 text-left">Broker</th><td class="px-4 py-3">{{ broker_status }}</td></tr>
+        <tr><th class="px-4 py-3 text-left">Environment</th><td class="px-4 py-3">{{ SUPERSURF_ENVIRONMENT }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% if issues %}
+    <div class="mt-4 space-y-2">
+      {% for issue in issues %}
+        <div class="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{{ issue.message }}</div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">No readiness issues for the current environment.</p>
+  {% endif %}
+</section>
+{% endblock %}
+

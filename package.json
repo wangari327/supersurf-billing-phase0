@@ -1,0 +1,13 @@
+{
+  "name": "supersurf-billing",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./assets/css/input.css -o ./static/css/app.css --minify",
+    "watch:css": "tailwindcss -i ./assets/css/input.css -o ./static/css/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.1.17",
+    "tailwindcss": "4.1.17"
+  }
+}

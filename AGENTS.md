@@ -4,9 +4,9 @@ This repository is for SuperSurf Billing, a Kenya-first ISP billing and subscrib
 
 ## Current Phase
 
-This repository has completed Phase 0, Phase 0.5, Phase 1 foundation work, Phase 1.1 security hardening, Phase 2 package catalog work, and Phase 3 subscriber registry work.
+This repository has completed Phase 0, Phase 0.5, Phase 1 foundation work, Phase 1.1 security hardening, Phase 2 package catalog work, Phase 3 subscriber registry work, and Phase 4 package assignment work.
 
-Do not begin the next phase, create subscription, package-assignment, discount, payment, wallet, ledger, invoice, customer-portal, RADIUS, PPPoE credential, RouterOS, provisioning, installation-fee, equipment-billing, or other network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
+Do not begin the next phase, create discount, payment, wallet, ledger, invoice, customer-portal, notification, automatic renewal, automatic expiry, grace-state automation, RADIUS, PPPoE credential, RouterOS, provisioning, installation-fee, equipment-billing, or other network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
 
 Phase 3 subscriber identifiers are backend generated and immutable:
 
@@ -45,6 +45,8 @@ Money must be stored as integer minor units. Never use binary floating-point val
 Phase 2 package prices are stored as integer KES minor units and entered by operators as ordinary KSh values. Discounts remain future work and must not be hard-coded into packages.
 
 Phase 3 subscriber phone normalization accepts only Kenya formats in the approved examples, stores normalized `+254...` values, and must not collect national ID, passport, KRA PIN, company registration, date of birth, gender, installation location, wallet, package, billing, M-PESA, payer, RADIUS, PPPoE, router, or equipment fields.
+
+Phase 4 subscriptions are manual package-assignment history only. `billing.Subscription` snapshots package terms at assignment time, stores integer KES minor units, permits only `active` and `ended` states, and must not create charges, invoices, renewals, expiry enforcement, payments, wallet or ledger entries, RADIUS rows, PPPoE credentials, RouterOS calls, provisioning jobs, notifications, installation fees, or equipment billing.
 
 ## Reuse-First Engineering
 

@@ -15,7 +15,13 @@ Do not create a microservice system for the MVP. Do not create one Django app pe
 - `support`
 - `audit`
 
-The database should be PostgreSQL. Background jobs should use Celery with Redis or a reviewed broker alternative. The UI should use Django templates, HTMX, Tailwind CSS, and minimal Alpine.js only where needed.
+The database should be PostgreSQL. Background jobs should use Celery with Redis or a reviewed broker alternative. The UI should use Django templates, HTMX, Tailwind CSS, and minimal JavaScript only where needed.
+
+## Implemented Through Phase 4
+
+The current application implements the Django foundation, staff users and roles, audit events, organization defaults, package catalog, subscriber registry, service references, and manual package assignment with immutable subscription history.
+
+Phase 4 subscriptions are not billing records. They do not create charges, wallets, ledgers, invoices, automatic renewals, automatic expiry, grace-state automation, payment records, RADIUS data, PPPoE credentials, RouterOS actions, provisioning jobs, installation fees, equipment billing, customer portals, notifications, or live network actions.
 
 ## Primary Components
 
@@ -53,11 +59,11 @@ Staff users, roles, permissions, TOTP, login throttling, sessions, staff audit e
 
 ### subscribers
 
-Subscribers, services, service locations, account numbers, payer numbers, status, notes.
+Subscribers, service references, account numbers, and active/inactive status. Service locations, payer numbers, and notes remain future work.
 
 ### billing
 
-Plans, subscriptions, renewal charges, wallets, append-only ledger, invoices, receipts, expiry and grace policy.
+Packages and manual subscription history. Renewal charges, wallets, append-only ledger, invoices, receipts, expiry enforcement, and grace-state automation remain future work.
 
 ### payments
 
@@ -80,4 +86,3 @@ Append-only audit trail, redaction, export events, before/after snapshots where 
 Phase 1 should create the Django foundation, Docker Compose, PostgreSQL, broker, staff authentication, RBAC, organization seed, configurable branding, base UI, audit framework, CI, and initial tests.
 
 Payments, subscribers, ledger, RADIUS, MikroTik, and production M-PESA must wait for later phases.
-

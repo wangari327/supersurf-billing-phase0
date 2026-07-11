@@ -65,12 +65,23 @@
 - [x] Tests.
 - [x] Stop for approval.
 
-## Future Phase: Subscriptions And Billing
+## Phase 4: Package Assignments
 
-- [ ] Package assignment.
-- [ ] Subscriptions.
+- [x] Manual package assignment.
+- [x] Immutable subscription history.
+- [x] Package snapshot fields.
+- [x] One active subscription per service.
+- [x] Audited assignment, package change, and ending workflows.
+- [x] Subscription permissions.
+- [x] Tests.
+- [x] Stop for approval.
+
+## Future Phase: Billing And Renewals
+
+- [ ] Billing charges.
 - [ ] Wallet.
 - [ ] Append-only ledger.
+- [ ] Invoices.
 - [ ] Renewal charges.
 - [ ] Renewal engine.
 - [ ] Expiry and suspension automation.

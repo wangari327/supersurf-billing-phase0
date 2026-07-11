@@ -2,7 +2,7 @@
 
 ## Supported Status
 
-This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, and Phase 3 subscriber registry. It is not production-ready for payments, subscriptions, RADIUS, or RouterOS operations.
+This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, and Phase 4 package assignments. It is not production-ready for payments, billing charges, RADIUS, or RouterOS operations.
 
 Security requirements in this document are binding for later phases unless explicitly superseded by a reviewed ADR.
 
@@ -23,6 +23,7 @@ Security requirements in this document are binding for later phases unless expli
 - GitHub Actions for tests, checks, secret scanning, vulnerability scanning, and licence report
 - Phase 2 package catalog with audited create, update, deactivate, and reactivate workflows
 - Phase 3 subscriber and service registry with audited create, update, deactivate, and reactivate workflows
+- Phase 4 audited package assignment, package change, and subscription ending workflows with immutable package snapshots
 
 ## Package Catalog Security
 
@@ -37,6 +38,14 @@ Subscriber audit metadata stores generated identifiers, changed field names, and
 Service references, labels, statuses, lists, counts, service-reference search results, and dashboard service counts require `subscribers.view_service`; `subscribers.view_subscriber` alone exposes only subscriber profile data.
 
 Subscriber and service admin pages are read-only. The internal allocation sequence is not registered in Django admin and has no default Django permissions. These are application-level controls, not database-level controls; direct SQL access or compromised database credentials can still alter rows.
+
+## Subscription Security
+
+Subscription mutations must go through audited service-layer functions. Package assignment snapshots package terms at creation time and stores price as integer KES minor units. Subscription identity and snapshot fields are immutable through model save, queryset update, and bulk update paths. Model delete and queryset delete are rejected in application code.
+
+Subscription information on subscriber pages requires both `subscribers.view_service` and `billing.view_subscription`. Mutations require `subscribers.view_service` plus `billing.add_subscription` or `billing.change_subscription`.
+
+The Django admin is read-only for subscriptions. These are application-level controls, not database-level controls; direct SQL access or compromised database credentials can still alter rows.
 
 ## Audit Immutability Boundary
 

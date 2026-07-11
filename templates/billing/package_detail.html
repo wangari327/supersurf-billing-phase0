@@ -33,6 +33,12 @@
       <p class="text-sm text-slate-600">Grace period</p>
       <p class="mt-1 text-xl font-semibold">{{ package.grace_period_hours }} hours</p>
     </div>
+    {% if active_subscription_count is not None %}
+      <div class="card p-4">
+        <p class="text-sm text-slate-600">Active subscriptions</p>
+        <p class="mt-1 text-xl font-semibold">{{ active_subscription_count }}</p>
+      </div>
+    {% endif %}
   </div>
 
   {% if package.description %}

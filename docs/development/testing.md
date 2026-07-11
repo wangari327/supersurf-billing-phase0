@@ -16,6 +16,29 @@ npm audit --audit-level=moderate
 npm run build:css
 ```
 
+Verify migrations from both important local states:
+
+```powershell
+uv run python manage.py migrate
+
+@'
+import tempfile
+from pathlib import Path
+
+from django.conf import settings
+from django.core.management import call_command
+
+tmp = Path(tempfile.mkdtemp()) / "clean.sqlite3"
+settings.DATABASES["default"]["NAME"] = tmp
+
+import django
+
+django.setup()
+call_command("migrate", verbosity=0)
+print(tmp)
+'@ | uv run python -
+```
+
 Run production-profile Django deployment checks with a check-only secret:
 
 ```powershell

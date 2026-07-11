@@ -2,9 +2,9 @@
 
 SuperSurf Billing is a planned Kenya-first ISP billing and subscriber-management platform for SuperSurf.
 
-This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, and the Phase 3 subscriber registry.
+This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, the Phase 3 subscriber registry, and Phase 4 package assignments.
 
-Phase 3 deliberately adds only subscriber accounts and service references. It does not include subscriptions, package assignment, discounts, payments, wallets, ledger transactions, invoices, M-PESA implementation, FreeRADIUS provisioning, PPPoE credentials, RouterOS integration, network provisioning, renewal automation, installation fees, equipment billing, customer portals, or live network actions.
+Phase 4 deliberately adds only manual package assignment and immutable subscription history. It does not include billing charges, invoices, discounts, payments, wallets, ledger transactions, M-PESA implementation, automatic renewals, automatic expiry, grace-state automation, FreeRADIUS provisioning, PPPoE credentials, RouterOS integration, network provisioning, installation fees, equipment billing, customer portals, notifications, or live network actions.
 
 ## Current Deliverables
 
@@ -36,18 +36,18 @@ Phase 3 deliberately adds only subscriber accounts and service references. It do
 - Phase 1.1 security hardening for redaction, role boundaries, admin bypass prevention, sensitive settings permissions, production fail-closed settings, and audit append-only behavior
 - Phase 2 package catalog with KSh minor-unit pricing, initial SuperSurf packages, audited package management, and deactivation/reactivation workflows
 - Phase 3 subscriber registry with generated subscriber account numbers, generated service references, Kenya phone normalization, audited profile/status workflows, and view-only access for non-admin operator roles
+- Phase 4 manual package assignment with immutable package snapshots and subscription history
 - GitHub Actions CI
 
 ## Phase Boundary
 
-Phase 3 is complete only for maintaining subscriber accounts and service references. Do not begin the next phase without explicit owner approval.
+Phase 4 is complete only for manual package assignment and subscription history. Do not begin the next phase without explicit owner approval.
 
 Still absent:
 
 - M-PESA implementation
-- Subscriptions
-- Package assignment
 - Discounts
+- Billing charges
 - Subscriber billing
 - Invoices
 - Wallets
@@ -56,10 +56,14 @@ Still absent:
 - PPPoE
 - RouterOS integration
 - Network provisioning
+- Automatic renewals
+- Automatic expiry
+- Grace-state automation
 - Renewal automation
 - Installation fees
 - Equipment billing
 - Customer portals
+- Notifications
 - Live network actions
 - Production credentials
 - Fake production domains, emails, Paybill numbers, Till numbers, or credentials
@@ -95,6 +99,7 @@ Start with:
 9. `docs/operations/first-owner.md`
 10. `docs/implementation/phase-2-package-catalog.md`
 11. `docs/implementation/phase-3-subscriber-registry.md`
+12. `docs/implementation/phase-4-package-assignments.md`
 
 ## Production Readiness
 

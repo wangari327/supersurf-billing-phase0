@@ -2,13 +2,15 @@
 
 This is a Phase 0.5 logical model, not a production migration.
 
-## Implemented Through Phase 3
+## Implemented Through Phase 4
 
 ```mermaid
 erDiagram
     ORGANIZATION ||--|| ORGANIZATION_BRANDING : has
     STAFF_USER ||--o{ AUDIT_EVENT : causes
     SUBSCRIBER ||--o{ SERVICE : owns
+    SERVICE ||--o{ SUBSCRIPTION : has
+    PLAN ||--o{ SUBSCRIPTION : snapshots
 
     ORGANIZATION {
         uuid id
@@ -60,9 +62,23 @@ erDiagram
         string label
         bool is_active
     }
+    SUBSCRIPTION {
+        uuid id
+        uuid service_id
+        uuid plan_id
+        string status
+        datetime starts_at
+        datetime ended_at
+        string plan_name
+        int download_speed_mbps
+        int price_minor
+        string currency
+        int duration_days
+        int grace_period_hours
+    }
 ```
 
-`PLAN` is deliberately not connected to `SERVICE` in Phase 3. Package assignment, subscriptions, billing, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, wallets, ledgers, installation, and equipment entities remain future work.
+`SUBSCRIPTION` is manual package-assignment history only in Phase 4. Billing charges, invoices, discounts, renewals, expiry enforcement, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, wallets, ledgers, installation, and equipment entities remain future work.
 
 ## Future Logical Model
 

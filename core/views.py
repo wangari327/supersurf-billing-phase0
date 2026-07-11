@@ -9,7 +9,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
 from audit.service import record_event
-from billing.models import Plan
+from billing.models import Plan, Subscription
 from subscribers.models import Service, Subscriber
 
 from .forms import BrandingForm, OrganizationForm, SensitiveOrganizationForm
@@ -29,8 +29,10 @@ def dashboard(request):
     can_view_packages = request.user.has_perm("billing.view_plan")
     can_view_subscribers = request.user.has_perm("subscribers.view_subscriber")
     can_view_services = request.user.has_perm("subscribers.view_service")
+    can_view_subscriptions = request.user.has_perm("billing.view_subscription")
     package_summary = None
     subscriber_summary = None
+    subscription_summary = None
     if can_view_packages:
         package_summary = {
             "active_count": Plan.objects.filter(is_active=True).count(),
@@ -46,6 +48,13 @@ def dashboard(request):
             subscriber_summary["inactive_services"] = Service.objects.filter(
                 is_active=False
             ).count()
+    if can_view_subscriptions:
+        subscription_summary = {
+            "active_count": Subscription.objects.filter(
+                status=Subscription.STATUS_ACTIVE
+            ).count(),
+            "ended_count": Subscription.objects.filter(status=Subscription.STATUS_ENDED).count(),
+        }
     return render(
         request,
         "core/dashboard.html",
@@ -67,6 +76,7 @@ def dashboard(request):
             "package_summary": package_summary,
             "subscriber_summary": subscriber_summary,
             "can_view_services": can_view_services,
+            "subscription_summary": subscription_summary,
         },
     )
 

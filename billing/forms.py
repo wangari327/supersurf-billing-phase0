@@ -88,3 +88,30 @@ class PlanForm(forms.ModelForm):
         if commit:
             plan.save()
         return plan
+
+
+class SubscriptionPackageForm(forms.Form):
+    plan = forms.ModelChoiceField(
+        label="Package",
+        queryset=Plan.objects.none(),
+        widget=forms.Select(attrs={"class": "field"}),
+    )
+    reason = forms.CharField(
+        label="Reason",
+        required=True,
+        widget=forms.Textarea(attrs={"class": "field", "rows": 3}),
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["plan"].queryset = Plan.objects.filter(is_active=True).order_by(
+            "download_speed_mbps",
+            "price_minor",
+            "name",
+        )
+
+    def clean_reason(self) -> str:
+        reason = self.cleaned_data["reason"].strip()
+        if not reason:
+            raise ValidationError("Reason is required.")
+        return reason

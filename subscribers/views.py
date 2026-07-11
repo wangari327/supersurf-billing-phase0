@@ -10,6 +10,8 @@ from django.db.models import Count, Q
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 
+from billing.models import Plan, Subscription
+
 from .forms import ServiceForm, SubscriberForm, SubscriberSearchForm
 from .models import Service, Subscriber
 from .services import (
@@ -87,20 +89,68 @@ def subscriber_list(request):
 @permission_required("subscribers.view_subscriber", raise_exception=True)
 def subscriber_detail(request, pk):
     can_view_services = request.user.has_perm("subscribers.view_service")
+    can_view_subscriptions = can_view_services and request.user.has_perm(
+        "billing.view_subscription"
+    )
     can_add_service = request.user.has_perm("subscribers.add_service")
     can_change_service = request.user.has_perm("subscribers.change_service")
+    can_assign_subscription = can_view_services and request.user.has_perm(
+        "billing.add_subscription"
+    )
+    can_change_subscription = can_view_services and request.user.has_perm(
+        "billing.change_subscription"
+    )
     subscribers = Subscriber.objects.all()
     if can_view_services:
         subscribers = subscribers.prefetch_related("services")
     subscriber = get_object_or_404(subscribers, pk=pk)
+    service_rows = []
+    active_plans = []
+    if can_view_services:
+        if can_assign_subscription or can_change_subscription:
+            active_plans = list(
+                Plan.objects.filter(is_active=True).order_by(
+                    "download_speed_mbps",
+                    "price_minor",
+                    "name",
+                )
+            )
+        for service in subscriber.services.all():
+            history = []
+            current_subscription = None
+            if can_view_subscriptions:
+                history = list(
+                    service.subscriptions.select_related("plan").order_by("-created_at", "-id")
+                )
+                current_subscription = next(
+                    (
+                        subscription
+                        for subscription in history
+                        if subscription.status == Subscription.STATUS_ACTIVE
+                    ),
+                    None,
+                )
+            service_rows.append(
+                {
+                    "service": service,
+                    "history": history,
+                    "current_subscription": current_subscription,
+                }
+            )
     return render(
         request,
         "subscribers/subscriber_detail.html",
         {
             "subscriber": subscriber,
             "can_view_services": can_view_services,
+            "can_view_subscriptions": can_view_subscriptions,
             "can_add_service": can_add_service,
             "can_change_service": can_change_service,
+            "can_assign_subscription": can_assign_subscription,
+            "can_change_subscription": can_change_subscription,
+            "service_rows": service_rows,
+            "service_count": len(service_rows),
+            "active_plans": active_plans,
         },
     )
 

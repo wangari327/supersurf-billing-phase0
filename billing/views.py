@@ -2,13 +2,23 @@ from __future__ import annotations
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import PackageSearchForm, PlanForm
-from .models import Plan
-from .services import create_package, set_package_active, update_package
+from subscribers.models import Service
+
+from .forms import PackageSearchForm, PlanForm, SubscriptionPackageForm
+from .models import Plan, Subscription
+from .services import (
+    assign_package,
+    change_subscription_package,
+    create_package,
+    end_subscription,
+    set_package_active,
+    update_package,
+)
 
 
 @login_required
@@ -40,7 +50,17 @@ def package_list(request):
 @permission_required("billing.view_plan", raise_exception=True)
 def package_detail(request, pk):
     package = get_object_or_404(Plan, pk=pk)
-    return render(request, "billing/package_detail.html", {"package": package})
+    active_subscription_count = None
+    if request.user.has_perm("billing.view_subscription"):
+        active_subscription_count = Subscription.objects.filter(
+            plan=package,
+            status=Subscription.STATUS_ACTIVE,
+        ).count()
+    return render(
+        request,
+        "billing/package_detail.html",
+        {"package": package, "active_subscription_count": active_subscription_count},
+    )
 
 
 @login_required
@@ -125,3 +145,90 @@ def package_reactivate(request, pk):
     )
     messages.success(request, "Package reactivated.")
     return redirect("package_detail", pk=package.pk)
+
+
+@login_required
+@permission_required("subscribers.view_service", raise_exception=True)
+@permission_required("billing.add_subscription", raise_exception=True)
+def subscription_assign(request, service_pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    service = get_object_or_404(Service.objects.select_related("subscriber"), pk=service_pk)
+    form = SubscriptionPackageForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("subscriber_detail", pk=service.subscriber_id)
+    try:
+        assign_package(
+            service=service,
+            plan=form.cleaned_data["plan"],
+            reason=form.cleaned_data["reason"],
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Package assigned.")
+    return redirect("subscriber_detail", pk=service.subscriber_id)
+
+
+@login_required
+@permission_required("subscribers.view_service", raise_exception=True)
+@permission_required("billing.change_subscription", raise_exception=True)
+def subscription_change_package(request, pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    subscription = get_object_or_404(
+        Subscription.objects.select_related("service", "service__subscriber"),
+        pk=pk,
+    )
+    form = SubscriptionPackageForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("subscriber_detail", pk=subscription.service.subscriber_id)
+    try:
+        change_subscription_package(
+            subscription=subscription,
+            plan=form.cleaned_data["plan"],
+            reason=form.cleaned_data["reason"],
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Package changed.")
+    return redirect("subscriber_detail", pk=subscription.service.subscriber_id)
+
+
+@login_required
+@permission_required("subscribers.view_service", raise_exception=True)
+@permission_required("billing.change_subscription", raise_exception=True)
+def subscription_end(request, pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    subscription = get_object_or_404(
+        Subscription.objects.select_related("service", "service__subscriber"),
+        pk=pk,
+    )
+    reason = request.POST.get("reason", "").strip()
+    if not reason:
+        messages.error(request, "Reason is required to end a subscription.")
+        return redirect("subscriber_detail", pk=subscription.service.subscriber_id)
+    try:
+        end_subscription(
+            subscription=subscription,
+            reason=reason,
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Subscription ended.")
+    return redirect("subscriber_detail", pk=subscription.service.subscriber_id)

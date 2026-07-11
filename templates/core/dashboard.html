@@ -68,6 +68,20 @@
     </section>
   {% endif %}
 
+  {% if subscription_summary %}
+    <section class="card p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Subscriptions</h2>
+          <p class="mt-1 text-sm text-slate-600">
+            {{ subscription_summary.active_count }} active,
+            {{ subscription_summary.ended_count }} ended
+          </p>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
   <section class="card p-4">
     <h2 class="text-lg font-semibold">Coming later</h2>
     <div class="mt-3 flex flex-wrap gap-2">

@@ -11,4 +11,15 @@ urlpatterns = [
     path("packages/<uuid:pk>/edit/", views.package_edit, name="package_edit"),
     path("packages/<uuid:pk>/deactivate/", views.package_deactivate, name="package_deactivate"),
     path("packages/<uuid:pk>/reactivate/", views.package_reactivate, name="package_reactivate"),
+    path(
+        "services/<uuid:service_pk>/subscriptions/assign/",
+        views.subscription_assign,
+        name="subscription_assign",
+    ),
+    path(
+        "subscriptions/<uuid:pk>/change-package/",
+        views.subscription_change_package,
+        name="subscription_change_package",
+    ),
+    path("subscriptions/<uuid:pk>/end/", views.subscription_end, name="subscription_end"),
 ]

@@ -95,3 +95,9 @@ Reason: SuperSurf needs a reviewed package catalog before subscriptions, renewal
 Decision: Phase 3 creates only `Subscriber`, `Service`, and one internal sequence/allocation model. Subscriber account numbers and service references are backend-generated and immutable. The Phase 3 phone normalizer stays Kenya-only and handles only the approved input shapes instead of adding a broader phone metadata dependency.
 
 Reason: SuperSurf needs stable subscriber and service identifiers before later subscription, billing, payment, RADIUS, PPPoE, RouterOS, installation, or equipment domains can reference them. Keeping Phase 3 narrow avoids collecting sensitive identity, location, billing, and network data before those later workflows are reviewed.
+
+## D017: Add Manual Package Assignment Before Billing
+
+Decision: Phase 4 creates `billing.Subscription` as immutable package-assignment history with package snapshots. It does not create charges, invoices, wallets, ledgers, renewals, payment records, RADIUS rows, PPPoE credentials, RouterOS calls, or provisioning jobs.
+
+Reason: Operators need a safe way to record which package applies to a service before any billing, renewal, payment, or network automation depends on that relationship. Snapshotting package terms preserves history when package definitions change later.

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - SuperSurf Billing{% endblock %}
+
+{% block content %}
+<section class="max-w-3xl">
+  <h1 class="text-2xl font-semibold">{{ title }}</h1>
+  <form method="post" class="mt-6 space-y-4">
+    {% csrf_token %}
+    {% for error in form.non_field_errors %}
+      <p class="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</p>
+    {% endfor %}
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div class="sm:col-span-2">
+        <label class="label" for="{{ form.name.id_for_label }}">{{ form.name.label }}</label>
+        {{ form.name }}
+        {% for error in form.name.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+      </div>
+      <div>
+        <label class="label" for="{{ form.download_speed_mbps.id_for_label }}">{{ form.download_speed_mbps.label }}</label>
+        {{ form.download_speed_mbps }}
+        {% for error in form.download_speed_mbps.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+      </div>
+      <div>
+        <label class="label" for="{{ form.price_ksh.id_for_label }}">{{ form.price_ksh.label }}</label>
+        {{ form.price_ksh }}
+        {% for error in form.price_ksh.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+      </div>
+      <div>
+        <label class="label" for="{{ form.duration_days.id_for_label }}">{{ form.duration_days.label }}</label>
+        {{ form.duration_days }}
+        {% for error in form.duration_days.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+      </div>
+      <div>
+        <label class="label" for="{{ form.grace_period_hours.id_for_label }}">{{ form.grace_period_hours.label }}</label>
+        {{ form.grace_period_hours }}
+        {% for error in form.grace_period_hours.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+      </div>
+      <div class="sm:col-span-2">
+        <label class="label" for="{{ form.description.id_for_label }}">{{ form.description.label }}</label>
+        {{ form.description }}
+        {% for error in form.description.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+      </div>
+      <div class="sm:col-span-2">
+        <label class="label" for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>
+        {{ form.reason }}
+        {% for error in form.reason.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+      <button class="btn btn-primary" type="submit">{{ submit_label }}</button>
+      <a class="btn" href="{% if package %}{% url 'package_detail' package.pk %}{% else %}{% url 'package_list' %}{% endif %}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

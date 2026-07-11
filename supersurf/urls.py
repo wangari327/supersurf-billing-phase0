@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
-from django.urls import path
+from django.urls import include, path
 
 from audit.views import audit_log
 from core import views as core_views
@@ -37,4 +37,5 @@ urlpatterns = [
     path("staff/<int:pk>/", user_views.staff_detail, name="staff_detail"),
     path("staff/<int:pk>/roles/", user_views.assign_roles, name="assign_roles"),
     path("audit/", audit_log, name="audit_log"),
+    path("", include("billing.urls")),
 ]

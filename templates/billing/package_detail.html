@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ package.name }} - Package{% endblock %}
+
+{% block content %}
+<section class="max-w-3xl">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">{{ package.name }}</h1>
+      <p class="mt-1 text-sm text-slate-600">Package catalog detail</p>
+    </div>
+    {% if package.is_active %}
+      <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Active</span>
+    {% else %}
+      <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Inactive</span>
+    {% endif %}
+  </div>
+
+  <div class="mt-6 grid gap-4 sm:grid-cols-2">
+    <div class="card p-4">
+      <p class="text-sm text-slate-600">Download speed</p>
+      <p class="mt-1 text-xl font-semibold">{{ package.download_speed_mbps }} Mbps</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-sm text-slate-600">Price</p>
+      <p class="mt-1 text-xl font-semibold">{{ package.formatted_price }}</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-sm text-slate-600">Duration</p>
+      <p class="mt-1 text-xl font-semibold">{{ package.duration_days }} days</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-sm text-slate-600">Grace period</p>
+      <p class="mt-1 text-xl font-semibold">{{ package.grace_period_hours }} hours</p>
+    </div>
+  </div>
+
+  {% if package.description %}
+    <div class="card mt-4 p-4">
+      <h2 class="text-lg font-semibold">Description</h2>
+      <p class="mt-2 text-sm text-slate-700">{{ package.description }}</p>
+    </div>
+  {% endif %}
+
+  <div class="mt-6 flex flex-wrap gap-2">
+    <a class="btn" href="{% url 'package_list' %}">Back to packages</a>
+    {% if perms.billing.change_plan %}
+      <a class="btn" href="{% url 'package_edit' package.pk %}">Edit package</a>
+    {% endif %}
+  </div>
+
+  {% if perms.billing.change_plan %}
+    <div class="card mt-6 p-4">
+      {% if package.is_active %}
+        <form method="post" action="{% url 'package_deactivate' package.pk %}" class="space-y-4">
+          {% csrf_token %}
+          <div>
+            <label class="label" for="deactivate_reason">Reason</label>
+            <textarea id="deactivate_reason" class="field" name="reason" rows="3" required></textarea>
+          </div>
+          <button class="btn" type="submit">Deactivate package</button>
+        </form>
+      {% else %}
+        <form method="post" action="{% url 'package_reactivate' package.pk %}" class="space-y-4">
+          {% csrf_token %}
+          <div>
+            <label class="label" for="reactivate_reason">Reason</label>
+            <textarea id="reactivate_reason" class="field" name="reason" rows="3" required></textarea>
+          </div>
+          <button class="btn btn-primary" type="submit">Reactivate package</button>
+        </form>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

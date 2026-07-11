@@ -83,3 +83,9 @@ Reason: Celery/Kombu 5.6.3 rejects redis-py 8.x through its dependency constrain
 Decision: include Caddy only in an optional local preview Compose profile.
 
 Reason: ordinary localhost development should not require a public domain or TLS reverse proxy. The Phase 1 Compose stack uses Django `runserver`; Caddy in this repository is not a production WSGI deployment.
+
+## D015: Add Package Catalog Before Subscriber Work
+
+Decision: Phase 2 creates the `billing.Plan` package catalog only. Operators see the term "Package", while the internal model stays `Plan`. Packages store KES prices as integer minor units, use 30-day duration and 24-hour grace defaults, and are deactivated rather than deleted.
+
+Reason: SuperSurf needs a reviewed package catalog before subscriptions, renewals, payments, wallets, invoices, discounts, RADIUS, RouterOS, or network provisioning can safely refer to package definitions.

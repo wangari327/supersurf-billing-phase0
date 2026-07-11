@@ -1,10 +1,10 @@
-# SuperSurf Billing Phase 0
+# SuperSurf Billing
 
 SuperSurf Billing is a planned Kenya-first ISP billing and subscriber-management platform for SuperSurf.
 
-This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, and the Phase 1.1 security-hardening correction.
+This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, and the Phase 2 package catalog.
 
-Phase 1 deliberately includes only `core`, `users`, and `audit` Django apps. It does not include M-PESA implementation, subscriber billing, wallets, ledger transactions, FreeRADIUS provisioning, PPPoE, RouterOS integration, or live network actions.
+Phase 2 deliberately adds only the `billing.Plan` package catalog. It does not include subscribers, services, subscriptions, discounts, payments, wallets, ledger transactions, invoices, M-PESA implementation, FreeRADIUS provisioning, PPPoE, RouterOS integration, network provisioning, renewal automation, installation fees, equipment billing, customer portals, or live network actions.
 
 ## Current Deliverables
 
@@ -34,21 +34,32 @@ Phase 1 deliberately includes only `core`, `users`, and `audit` Django apps. It 
 - Minimal Celery broker/worker wiring
 - Development-only Docker Compose definitions for web, PostgreSQL, Valkey broker, worker, and scheduler
 - Phase 1.1 security hardening for redaction, role boundaries, admin bypass prevention, sensitive settings permissions, production fail-closed settings, and audit append-only behavior
+- Phase 2 package catalog with KSh minor-unit pricing, initial SuperSurf packages, audited package management, and deactivation/reactivation workflows
 - GitHub Actions CI
 
 ## Phase Boundary
 
-Phase 1 is complete as a foundation. Do not begin Phase 2 without explicit owner approval.
+Phase 2 is complete only for package catalog management. Do not begin Phase 3 without explicit owner approval.
 
-Disallowed in Phase 1 and still absent:
+Still absent:
 
 - M-PESA implementation
+- Subscribers
+- Services
+- Subscriptions
+- Discounts
 - Subscriber billing
+- Invoices
 - Wallets
 - Ledger transactions
 - FreeRADIUS provisioning
 - PPPoE
 - RouterOS integration
+- Network provisioning
+- Renewal automation
+- Installation fees
+- Equipment billing
+- Customer portals
 - Live network actions
 - Production credentials
 - Fake production domains, emails, Paybill numbers, Till numbers, or credentials
@@ -82,6 +93,7 @@ Start with:
 7. `docs/research/blocking-questions.md`
 8. `docs/development/local-setup.md`
 9. `docs/operations/first-owner.md`
+10. `docs/implementation/phase-2-package-catalog.md`
 
 ## Production Readiness
 

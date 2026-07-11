@@ -9,6 +9,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
 from audit.service import record_event
+from billing.models import Plan
 
 from .forms import BrandingForm, OrganizationForm, SensitiveOrganizationForm
 from .services import (
@@ -24,6 +25,13 @@ SENSITIVE_ORGANIZATION_FIELDS = set(SensitiveOrganizationForm.Meta.fields)
 def dashboard(request):
     organization = get_or_create_default_organization()
     issues = production_readiness_issues(organization)
+    can_view_packages = request.user.has_perm("billing.view_plan")
+    package_summary = None
+    if can_view_packages:
+        package_summary = {
+            "active_count": Plan.objects.filter(is_active=True).count(),
+            "inactive_count": Plan.objects.filter(is_active=False).count(),
+        }
     return render(
         request,
         "core/dashboard.html",
@@ -32,7 +40,6 @@ def dashboard(request):
             "issues": issues,
             "coming_later": [
                 "Subscribers",
-                "Plans",
                 "Payments",
                 "Unmatched Payments",
                 "Invoices",
@@ -44,6 +51,7 @@ def dashboard(request):
                 "Reconciliation",
                 "SuperSurf Support",
             ],
+            "package_summary": package_summary,
         },
     )
 

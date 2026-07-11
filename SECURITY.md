@@ -2,7 +2,7 @@
 
 ## Supported Status
 
-This repository includes the Phase 1 foundation runtime. It is not production-ready for payments, billing, subscriber management, RADIUS, or RouterOS operations.
+This repository includes the Phase 1 foundation runtime and Phase 2 package catalog. It is not production-ready for payments, subscriber management, RADIUS, or RouterOS operations.
 
 Security requirements in this document are binding for later phases unless explicitly superseded by a reviewed ADR.
 
@@ -21,6 +21,11 @@ Security requirements in this document are binding for later phases unless expli
 - Production deployment checks
 - Local secret scanning script
 - GitHub Actions for tests, checks, secret scanning, vulnerability scanning, and licence report
+- Phase 2 package catalog with audited create, update, deactivate, and reactivate workflows
+
+## Package Catalog Security
+
+Package mutations must go through the audited package UI. The Django admin is read-only for packages. Normal workflows deactivate packages instead of deleting them. Package audit events store focused changed-field metadata and the required operator reason; they do not store raw POST payloads.
 
 ## Audit Immutability Boundary
 

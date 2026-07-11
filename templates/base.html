@@ -15,6 +15,9 @@
         {% if request.user.is_authenticated %}
           <nav class="flex flex-wrap items-center gap-2 text-sm" aria-label="Primary">
             <a class="btn" href="{% url 'dashboard' %}">Dashboard</a>
+            {% if perms.billing.view_plan %}
+              <a class="btn" href="{% url 'package_list' %}">Packages</a>
+            {% endif %}
             {% if perms.core.change_organization %}
               <a class="btn" href="{% url 'organization_settings' %}">SuperSurf Settings</a>
             {% endif %}
@@ -47,4 +50,3 @@
     </main>
   </body>
 </html>
-

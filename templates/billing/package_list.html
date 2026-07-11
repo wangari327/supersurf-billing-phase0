@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Packages - SuperSurf Billing{% endblock %}
+
+{% block content %}
+<section>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Packages</h1>
+      <p class="mt-1 text-sm text-slate-600">Billing package catalog</p>
+    </div>
+    {% if perms.billing.add_plan %}
+      <a class="btn btn-primary" href="{% url 'package_create' %}">New package</a>
+    {% endif %}
+  </div>
+
+  <form method="get" class="mt-6 grid gap-4 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-3">
+    <div class="sm:col-span-2">
+      <label class="label" for="{{ form.q.id_for_label }}">{{ form.q.label }}</label>
+      {{ form.q }}
+    </div>
+    <div>
+      <label class="label" for="{{ form.status.id_for_label }}">{{ form.status.label }}</label>
+      {{ form.status }}
+    </div>
+    <div class="sm:col-span-3">
+      <button class="btn" type="submit">Apply filters</button>
+      <a class="btn" href="{% url 'package_list' %}">Clear</a>
+    </div>
+  </form>
+
+  <div class="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    {% if page.object_list %}
+      <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+          <tr>
+            <th class="px-4 py-3 text-left">Package</th>
+            <th class="px-4 py-3 text-left">Download</th>
+            <th class="px-4 py-3 text-left">Price</th>
+            <th class="px-4 py-3 text-left">Duration</th>
+            <th class="px-4 py-3 text-left">Grace</th>
+            <th class="px-4 py-3 text-left">Status</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {% for package in page.object_list %}
+            <tr>
+              <td class="px-4 py-3">
+                <a class="font-medium" href="{% url 'package_detail' package.pk %}">{{ package.name }}</a>
+              </td>
+              <td class="px-4 py-3">{{ package.download_speed_mbps }} Mbps</td>
+              <td class="px-4 py-3">{{ package.formatted_price }}</td>
+              <td class="px-4 py-3">{{ package.duration_days }} days</td>
+              <td class="px-4 py-3">{{ package.grace_period_hours }} hours</td>
+              <td class="px-4 py-3">
+                {% if package.is_active %}
+                  <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Active</span>
+                {% else %}
+                  <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Inactive</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="p-6 text-sm text-slate-600">No packages match the current filters.</p>
+    {% endif %}
+  </div>
+
+  {% if page.paginator.num_pages > 1 %}
+    <nav class="mt-4 flex gap-2 text-sm" aria-label="Pagination">
+      {% if page.has_previous %}
+        <a class="btn" href="?q={{ query }}&status={{ status }}&page={{ page.previous_page_number }}">Previous</a>
+      {% endif %}
+      <span class="px-3 py-2">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}
+        <a class="btn" href="?q={{ query }}&status={{ status }}&page={{ page.next_page_number }}">Next</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+</section>
+{% endblock %}

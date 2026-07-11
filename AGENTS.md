@@ -4,9 +4,9 @@ This repository is for SuperSurf Billing, a Kenya-first ISP billing and subscrib
 
 ## Current Phase
 
-This repository has completed Phase 0, Phase 0.5, and Phase 1 foundation work.
+This repository has completed Phase 0, Phase 0.5, Phase 1 foundation work, Phase 1.1 security hardening, and Phase 2 package catalog work.
 
-Do not begin Phase 2, create payment/subscriber/network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
+Do not begin Phase 3, create subscriber, subscription, discount, payment, wallet, ledger, invoice, customer-portal, or network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
 
 ## Brand Rules
 
@@ -35,6 +35,8 @@ Fresh installations must default to:
 - Default telephone country code: +254
 
 Money must be stored as integer minor units. Never use binary floating-point values for ledger or payment amounts.
+
+Phase 2 package prices are stored as integer KES minor units and entered by operators as ordinary KSh values. Discounts remain future work and must not be hard-coded into packages.
 
 ## Reuse-First Engineering
 

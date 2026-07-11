@@ -27,27 +27,34 @@ ROLE_PERMISSION_CODENAMES = {
         "users.change_user",
         "users.assign_roles",
         "audit.view_auditevent",
+        "billing.view_plan",
+        "billing.add_plan",
+        "billing.change_plan",
     ],
     ROLE_FINANCE: [
         "core.view_organization",
         "core.view_organizationbranding",
         "audit.view_auditevent",
+        "billing.view_plan",
     ],
     ROLE_NOC: [
         "core.view_organization",
         "core.view_organizationbranding",
         "audit.view_auditevent",
+        "billing.view_plan",
     ],
     ROLE_SUPPORT: [
         "core.view_organization",
         "core.view_organizationbranding",
         "users.view_user",
+        "billing.view_plan",
     ],
     ROLE_READ_ONLY: [
         "core.view_organization",
         "core.view_organizationbranding",
         "users.view_user",
         "audit.view_auditevent",
+        "billing.view_plan",
     ],
 }
 

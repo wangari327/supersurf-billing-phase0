@@ -35,6 +35,18 @@
     </section>
   {% endif %}
 
+  {% if package_summary %}
+    <section class="card p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Packages</h2>
+          <p class="mt-1 text-sm text-slate-600">{{ package_summary.active_count }} active, {{ package_summary.inactive_count }} inactive</p>
+        </div>
+        <a class="btn" href="{% url 'package_list' %}">View packages</a>
+      </div>
+    </section>
+  {% endif %}
+
   <section class="card p-4">
     <h2 class="text-lg font-semibold">Coming later</h2>
     <div class="mt-3 flex flex-wrap gap-2">
@@ -45,4 +57,3 @@
   </section>
 </div>
 {% endblock %}
-

@@ -38,4 +38,5 @@ urlpatterns = [
     path("staff/<int:pk>/roles/", user_views.assign_roles, name="assign_roles"),
     path("audit/", audit_log, name="audit_log"),
     path("", include("billing.urls")),
+    path("", include("subscribers.urls")),
 ]

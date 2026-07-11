@@ -47,6 +47,25 @@
     </section>
   {% endif %}
 
+  {% if subscriber_summary %}
+    <section class="card p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Subscribers</h2>
+          <p class="mt-1 text-sm text-slate-600">
+            {{ subscriber_summary.active_subscribers }} active subscribers,
+            {{ subscriber_summary.inactive_subscribers }} inactive subscribers
+          </p>
+          <p class="mt-1 text-sm text-slate-600">
+            {{ subscriber_summary.active_services }} active services,
+            {{ subscriber_summary.inactive_services }} inactive services
+          </p>
+        </div>
+        <a class="btn" href="{% url 'subscriber_list' %}">View subscribers</a>
+      </div>
+    </section>
+  {% endif %}
+
   <section class="card p-4">
     <h2 class="text-lg font-semibold">Coming later</h2>
     <div class="mt-3 flex flex-wrap gap-2">

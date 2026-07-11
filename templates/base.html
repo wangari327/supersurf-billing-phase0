@@ -18,6 +18,9 @@
             {% if perms.billing.view_plan %}
               <a class="btn" href="{% url 'package_list' %}">Packages</a>
             {% endif %}
+            {% if perms.subscribers.view_subscriber %}
+              <a class="btn" href="{% url 'subscriber_list' %}">Subscribers</a>
+            {% endif %}
             {% if perms.core.change_organization %}
               <a class="btn" href="{% url 'organization_settings' %}">SuperSurf Settings</a>
             {% endif %}

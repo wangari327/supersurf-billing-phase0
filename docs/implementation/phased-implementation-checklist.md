@@ -18,37 +18,67 @@
 
 ## Phase 1: Foundation
 
-- [ ] Django project.
-- [ ] Docker Compose.
-- [ ] PostgreSQL.
-- [ ] Broker and Celery.
-- [ ] Reverse proxy development configuration.
-- [ ] Staff authentication.
-- [ ] RBAC.
-- [ ] SuperSurf organization seed.
-- [ ] Configurable branding.
-- [ ] Base UI.
-- [ ] Audit framework.
-- [ ] CI.
-- [ ] Initial tests.
-- [ ] Stop for approval.
+- [x] Django project.
+- [x] Docker Compose.
+- [x] PostgreSQL development option.
+- [x] Broker and Celery.
+- [x] Reverse proxy development configuration.
+- [x] Staff authentication.
+- [x] RBAC.
+- [x] SuperSurf organization seed.
+- [x] Configurable branding.
+- [x] Base UI.
+- [x] Audit framework.
+- [x] CI.
+- [x] Initial tests.
+- [x] Stop for approval.
 
-## Phase 2: Subscribers And Billing
+## Phase 1.1: Security Hardening
 
-- [ ] Subscribers.
-- [ ] Service locations.
-- [ ] Plans.
+- [x] Audit redaction and append-only protections.
+- [x] Role boundary corrections.
+- [x] Admin bypass prevention.
+- [x] Sensitive settings permissions.
+- [x] Production fail-closed settings.
+- [x] Regression tests.
+- [x] Stop for approval.
+
+## Phase 2: Package Catalog
+
+- [x] Packages.
+- [x] KES minor-unit pricing.
+- [x] Initial package seed migration.
+- [x] Audited package create/update/status workflows.
+- [x] Package permissions.
+- [x] Tests.
+- [x] Stop for approval.
+
+## Phase 3: Subscriber Registry
+
+- [x] Subscriber accounts.
+- [x] Service references.
+- [x] Backend-generated immutable identifiers.
+- [x] Kenya phone normalization.
+- [x] Audited subscriber and service create/update/status workflows.
+- [x] Subscriber and service permissions.
+- [x] Dashboard and navigation updates.
+- [x] Tests.
+- [x] Stop for approval.
+
+## Future Phase: Subscriptions And Billing
+
+- [ ] Package assignment.
 - [ ] Subscriptions.
 - [ ] Wallet.
 - [ ] Append-only ledger.
 - [ ] Renewal charges.
 - [ ] Renewal engine.
-- [ ] Suspension state machine.
+- [ ] Expiry and suspension automation.
 - [ ] Reports.
 - [ ] Tests.
 - [ ] Stop for approval.
 
-## Phase 3: M-PESA
+## Future Phase: M-PESA
 
 - [ ] Validated Daraja research.
 - [ ] Sandbox setup.
@@ -63,7 +93,7 @@
 - [ ] Tests.
 - [ ] Stop for approval.
 
-## Phase 4: FreeRADIUS
+## Future Phase: FreeRADIUS
 
 - [ ] FreeRADIUS container or package.
 - [ ] PostgreSQL integration.
@@ -76,7 +106,7 @@
 - [ ] Documentation.
 - [ ] Stop for approval.
 
-## Phase 5: MikroTik
+## Future Phase: MikroTik
 
 - [ ] RouterOS adapter.
 - [ ] Fake adapter.
@@ -92,7 +122,7 @@
 - [ ] Tests.
 - [ ] Stop for approval.
 
-## Phase 6: Controlled Pilot
+## Future Phase: Controlled Pilot
 
 - [ ] One test plan.
 - [ ] One test subscriber.
@@ -106,7 +136,7 @@
 - [ ] Pilot report.
 - [ ] Stop for explicit production approval.
 
-## Phase 7: Production Hardening
+## Future Phase: Production Hardening
 
 - [ ] Production Compose configuration.
 - [ ] TLS.
@@ -121,4 +151,3 @@
 - [ ] SuperSurf operator handbook.
 - [ ] Migration checklist.
 - [ ] Stop for final review.
-

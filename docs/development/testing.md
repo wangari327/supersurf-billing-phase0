@@ -3,10 +3,17 @@
 Run the local checks:
 
 ```powershell
+uv lock --check
+uv run python manage.py makemigrations --check --dry-run
+uv run python manage.py migrate
+uv run python manage.py check
 uv run pytest
 uv run ruff check .
-uv run mypy supersurf core users audit
-uv run python manage.py check
+uv run mypy supersurf core users audit billing subscribers
+uv run python scripts/scan_secrets.py
+uv run pip-audit
+npm audit --audit-level=moderate
+npm run build:css
 ```
 
 Run production-profile Django deployment checks with a check-only secret:

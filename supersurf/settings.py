@@ -121,6 +121,7 @@ INSTALLED_APPS = [
     "core",
     "audit",
     "billing",
+    "subscribers",
 ]
 
 MIDDLEWARE = [

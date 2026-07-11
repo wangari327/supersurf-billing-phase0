@@ -10,6 +10,7 @@ from django.shortcuts import redirect, render
 
 from audit.service import record_event
 from billing.models import Plan
+from subscribers.models import Service, Subscriber
 
 from .forms import BrandingForm, OrganizationForm, SensitiveOrganizationForm
 from .services import (
@@ -26,11 +27,20 @@ def dashboard(request):
     organization = get_or_create_default_organization()
     issues = production_readiness_issues(organization)
     can_view_packages = request.user.has_perm("billing.view_plan")
+    can_view_subscribers = request.user.has_perm("subscribers.view_subscriber")
     package_summary = None
+    subscriber_summary = None
     if can_view_packages:
         package_summary = {
             "active_count": Plan.objects.filter(is_active=True).count(),
             "inactive_count": Plan.objects.filter(is_active=False).count(),
+        }
+    if can_view_subscribers:
+        subscriber_summary = {
+            "active_subscribers": Subscriber.objects.filter(is_active=True).count(),
+            "inactive_subscribers": Subscriber.objects.filter(is_active=False).count(),
+            "active_services": Service.objects.filter(is_active=True).count(),
+            "inactive_services": Service.objects.filter(is_active=False).count(),
         }
     return render(
         request,
@@ -39,7 +49,6 @@ def dashboard(request):
             "organization": organization,
             "issues": issues,
             "coming_later": [
-                "Subscribers",
                 "Payments",
                 "Unmatched Payments",
                 "Invoices",
@@ -52,6 +61,7 @@ def dashboard(request):
                 "SuperSurf Support",
             ],
             "package_summary": package_summary,
+            "subscriber_summary": subscriber_summary,
         },
     )
 

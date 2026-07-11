@@ -2,9 +2,9 @@
 
 SuperSurf Billing is a planned Kenya-first ISP billing and subscriber-management platform for SuperSurf.
 
-This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, and the Phase 2 package catalog.
+This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, and the Phase 3 subscriber registry.
 
-Phase 2 deliberately adds only the `billing.Plan` package catalog. It does not include subscribers, services, subscriptions, discounts, payments, wallets, ledger transactions, invoices, M-PESA implementation, FreeRADIUS provisioning, PPPoE, RouterOS integration, network provisioning, renewal automation, installation fees, equipment billing, customer portals, or live network actions.
+Phase 3 deliberately adds only subscriber accounts and service references. It does not include subscriptions, package assignment, discounts, payments, wallets, ledger transactions, invoices, M-PESA implementation, FreeRADIUS provisioning, PPPoE credentials, RouterOS integration, network provisioning, renewal automation, installation fees, equipment billing, customer portals, or live network actions.
 
 ## Current Deliverables
 
@@ -35,18 +35,18 @@ Phase 2 deliberately adds only the `billing.Plan` package catalog. It does not i
 - Development-only Docker Compose definitions for web, PostgreSQL, Valkey broker, worker, and scheduler
 - Phase 1.1 security hardening for redaction, role boundaries, admin bypass prevention, sensitive settings permissions, production fail-closed settings, and audit append-only behavior
 - Phase 2 package catalog with KSh minor-unit pricing, initial SuperSurf packages, audited package management, and deactivation/reactivation workflows
+- Phase 3 subscriber registry with generated subscriber account numbers, generated service references, Kenya phone normalization, audited profile/status workflows, and view-only access for non-admin operator roles
 - GitHub Actions CI
 
 ## Phase Boundary
 
-Phase 2 is complete only for package catalog management. Do not begin Phase 3 without explicit owner approval.
+Phase 3 is complete only for maintaining subscriber accounts and service references. Do not begin the next phase without explicit owner approval.
 
 Still absent:
 
 - M-PESA implementation
-- Subscribers
-- Services
 - Subscriptions
+- Package assignment
 - Discounts
 - Subscriber billing
 - Invoices
@@ -94,6 +94,7 @@ Start with:
 8. `docs/development/local-setup.md`
 9. `docs/operations/first-owner.md`
 10. `docs/implementation/phase-2-package-catalog.md`
+11. `docs/implementation/phase-3-subscriber-registry.md`
 
 ## Production Readiness
 

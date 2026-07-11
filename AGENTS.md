@@ -4,9 +4,15 @@ This repository is for SuperSurf Billing, a Kenya-first ISP billing and subscrib
 
 ## Current Phase
 
-This repository has completed Phase 0, Phase 0.5, Phase 1 foundation work, Phase 1.1 security hardening, and Phase 2 package catalog work.
+This repository has completed Phase 0, Phase 0.5, Phase 1 foundation work, Phase 1.1 security hardening, Phase 2 package catalog work, and Phase 3 subscriber registry work.
 
-Do not begin Phase 3, create subscriber, subscription, discount, payment, wallet, ledger, invoice, customer-portal, or network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
+Do not begin the next phase, create subscription, package-assignment, discount, payment, wallet, ledger, invoice, customer-portal, RADIUS, PPPoE credential, RouterOS, provisioning, installation-fee, equipment-billing, or other network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
+
+Phase 3 subscriber identifiers are backend generated and immutable:
+
+- Subscriber account numbers use `SS000001` through the internal account sequence.
+- Service references use `SS000001-01` through `SS000001-99` per subscriber.
+- A future PPPoE username convention may lowercase the service reference, such as `ss000001-01`, but the repository must not add PPPoE fields or credentials in Phase 3.
 
 ## Brand Rules
 
@@ -37,6 +43,8 @@ Fresh installations must default to:
 Money must be stored as integer minor units. Never use binary floating-point values for ledger or payment amounts.
 
 Phase 2 package prices are stored as integer KES minor units and entered by operators as ordinary KSh values. Discounts remain future work and must not be hard-coded into packages.
+
+Phase 3 subscriber phone normalization accepts only Kenya formats in the approved examples, stores normalized `+254...` values, and must not collect national ID, passport, KRA PIN, company registration, date of birth, gender, installation location, wallet, package, billing, M-PESA, payer, RADIUS, PPPoE, router, or equipment fields.
 
 ## Reuse-First Engineering
 

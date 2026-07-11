@@ -6,11 +6,11 @@ Decision: adopt Django auth.
 
 Reason: authentication, password hashing, sessions, CSRF integration, and permissions are mature and maintained in Django.
 
-## D002: Use Phone Metadata Library Instead Of Custom Kenyan Parser
+## D002: Defer Broad Phone Metadata Library Until Needed
 
-Decision: adopt `phonenumbers` behind `PhoneNumberNormalizer`.
+Decision: Phase 0 preferred adopting `phonenumbers` behind a broader normalizer. Phase 3 supersedes that for the narrow subscriber registry in D016 and uses the approved Kenya-only examples directly.
 
-Reason: Kenyan numbering metadata can change. A maintained metadata-backed library is safer than custom parsing.
+Reason: Phase 3 accepts only a small, owner-approved set of Kenya input formats and must avoid adding dependencies outside the narrow registry scope. A metadata-backed library should be reconsidered if later phases need broader international or landline support.
 
 ## D003: Implement SuperSurf Ledger Minimally In-House
 
@@ -89,3 +89,9 @@ Reason: ordinary localhost development should not require a public domain or TLS
 Decision: Phase 2 creates the `billing.Plan` package catalog only. Operators see the term "Package", while the internal model stays `Plan`. Packages store KES prices as integer minor units, use 30-day duration and 24-hour grace defaults, and are deactivated rather than deleted.
 
 Reason: SuperSurf needs a reviewed package catalog before subscriptions, renewals, payments, wallets, invoices, discounts, RADIUS, RouterOS, or network provisioning can safely refer to package definitions.
+
+## D016: Add Subscriber Registry Before Subscriptions
+
+Decision: Phase 3 creates only `Subscriber`, `Service`, and one internal sequence/allocation model. Subscriber account numbers and service references are backend-generated and immutable. The Phase 3 phone normalizer stays Kenya-only and handles only the approved input shapes instead of adding a broader phone metadata dependency.
+
+Reason: SuperSurf needs stable subscriber and service identifiers before later subscription, billing, payment, RADIUS, PPPoE, RouterOS, installation, or equipment domains can reference them. Keeping Phase 3 narrow avoids collecting sensitive identity, location, billing, and network data before those later workflows are reviewed.

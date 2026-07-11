@@ -44,7 +44,7 @@ ignore = ["DJ008"]
 
 [tool.mypy]
 python_version = "3.13"
-files = ["supersurf", "core", "users", "audit"]
+files = ["supersurf", "core", "users", "audit", "billing", "subscribers"]
 exclude = "migrations"
 ignore_missing_imports = true
 warn_unused_ignores = true

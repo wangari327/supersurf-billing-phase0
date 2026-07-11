@@ -2,6 +2,70 @@
 
 This is a Phase 0.5 logical model, not a production migration.
 
+## Implemented Through Phase 3
+
+```mermaid
+erDiagram
+    ORGANIZATION ||--|| ORGANIZATION_BRANDING : has
+    STAFF_USER ||--o{ AUDIT_EVENT : causes
+    SUBSCRIBER ||--o{ SERVICE : owns
+
+    ORGANIZATION {
+        uuid id
+        string trading_name
+        string product_name
+        string country_code
+        string currency
+        string timezone
+    }
+    STAFF_USER {
+        int id
+        string username
+        string email
+        string display_name
+        bool is_active
+    }
+    AUDIT_EVENT {
+        bigint id
+        string action
+        string target_type
+        string target_identifier
+        json safe_metadata
+        datetime created_at
+    }
+    PLAN {
+        uuid id
+        string name
+        int download_speed_mbps
+        int price_minor
+        string currency
+        int duration_days
+        int grace_period_hours
+        bool is_active
+    }
+    SUBSCRIBER {
+        uuid id
+        string account_number
+        string customer_type
+        string display_name
+        string primary_phone
+        string email
+        bool is_active
+    }
+    SERVICE {
+        uuid id
+        uuid subscriber_id
+        int service_number
+        string service_reference
+        string label
+        bool is_active
+    }
+```
+
+`PLAN` is deliberately not connected to `SERVICE` in Phase 3. Package assignment, subscriptions, billing, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, wallets, ledgers, installation, and equipment entities remain future work.
+
+## Future Logical Model
+
 ```mermaid
 erDiagram
     ORGANIZATION ||--o{ ORGANIZATION_SETTING : owns
@@ -72,16 +136,21 @@ erDiagram
     SUBSCRIBER {
         uuid id
         string account_number
+        string customer_type
         string display_name
-        string status
+        string primary_phone
+        string email
+        bool is_active
         datetime created_at
     }
     SERVICE {
         uuid id
         uuid subscriber_id
-        string status
-        datetime activated_at
-        datetime suspended_at
+        int service_number
+        string service_reference
+        string label
+        bool is_active
+        datetime created_at
     }
     PLAN {
         uuid id
@@ -218,4 +287,3 @@ Credentials must not be stored directly in ordinary display fields. Store only e
 - Never display full RADIUS secrets after initial entry.
 - RADIUS secrets must be encrypted or loaded through a secret provider.
 - RADIUS tables may include official FreeRADIUS tables alongside SuperSurf-owned service and provisioning tables.
-

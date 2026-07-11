@@ -43,7 +43,7 @@ jobs:
         run: uv run ruff check .
 
       - name: mypy
-        run: uv run mypy supersurf core users audit
+        run: uv run mypy supersurf core users audit billing subscribers
 
       - name: Django checks
         run: uv run python manage.py check

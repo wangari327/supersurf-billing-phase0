@@ -35,6 +35,14 @@ docker compose exec web uv run python manage.py migrate
 docker compose exec web uv run python manage.py seed_roles
 ```
 
+This Compose stack is development-only. It uses Django `runserver`, development credentials, PostgreSQL, and Valkey for local workflows. The optional Caddy file is a local reverse-proxy preview:
+
+```powershell
+docker compose -f compose.yaml -f compose.caddy.yaml --profile local-tls-preview up --build
+```
+
+Do not treat Django `runserver` plus Caddy as a production WSGI deployment.
+
 ## First Owner
 
 Create the first owner explicitly:
@@ -46,4 +54,3 @@ Remove-Item Env:FIRST_OWNER_PASSWORD
 ```
 
 Do not commit real passwords or production credentials.
-

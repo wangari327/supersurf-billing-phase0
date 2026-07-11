@@ -1,9 +1,10 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 
 @source "../../templates/**/*.html";
 @source "../../core/templates/**/*.html";
 @source "../../users/templates/**/*.html";
 @source "../../audit/templates/**/*.html";
+@source inline("bg-sky-50 text-sky-800 ring-sky-700/20 bg-violet-50 text-violet-800 ring-violet-700/20 bg-amber-50 text-amber-900 ring-amber-700/20 bg-rose-50 text-rose-800 ring-rose-700/20 bg-slate-50 text-slate-800 ring-slate-700/20");
 
 @theme {
   --color-supersurf-blue: #075985;

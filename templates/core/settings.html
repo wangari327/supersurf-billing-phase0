@@ -33,10 +33,26 @@
         {% endfor %}
       </div>
     </div>
+    {% if sensitive_form %}
+      <div class="card p-4 lg:col-span-2">
+        <h2 class="text-lg font-semibold">Sensitive Settings</h2>
+        {% if not can_change_sensitive_settings %}
+          <p class="mt-1 text-sm text-slate-600">Visible with restricted editing.</p>
+        {% endif %}
+        <div class="mt-4 grid gap-4 lg:grid-cols-2">
+          {% for field in sensitive_form %}
+            <div>
+              <label class="label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% for error in field.errors %}<p class="text-sm text-rose-700">{{ error }}</p>{% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
     <div class="lg:col-span-2">
       <button class="btn btn-primary" type="submit">Save settings</button>
     </div>
   </form>
 </section>
 {% endblock %}
-

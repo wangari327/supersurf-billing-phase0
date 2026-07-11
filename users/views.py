@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.views import PasswordChangeView
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -13,7 +14,7 @@ from audit.service import record_event
 
 from .forms import RoleAssignmentForm, StaffProfileForm, StaffSearchForm
 from .models import User
-from .services import invalidate_user_sessions
+from .services import assign_roles_to_user
 
 
 @login_required
@@ -50,28 +51,32 @@ def staff_detail(request, pk: int):
 def assign_roles(request, pk: int):
     staff_user = get_object_or_404(User.objects.prefetch_related("groups"), pk=pk)
     if request.method == "POST":
-        form = RoleAssignmentForm(request.POST)
+        form = RoleAssignmentForm(request.POST, actor=request.user)
         if form.is_valid():
-            old_roles = list(staff_user.groups.order_by("name").values_list("name", flat=True))
-            staff_user.groups.set(form.cleaned_data["roles"])
-            new_roles = list(staff_user.groups.order_by("name").values_list("name", flat=True))
-            removed_sessions = invalidate_user_sessions(staff_user.pk)
-            record_event(
-                action="staff.roles.changed",
-                request=request,
-                target_type="user",
-                target_identifier=staff_user.pk,
-                metadata={
-                    "old_roles": old_roles,
-                    "new_roles": new_roles,
-                    "removed_sessions": removed_sessions,
-                },
-                reason=form.cleaned_data["reason"],
-            )
-            messages.success(request, "Staff roles updated.")
-            return redirect("staff_detail", pk=staff_user.pk)
+            try:
+                assign_roles_to_user(
+                    actor=request.user,
+                    request=request,
+                    target_user=staff_user,
+                    roles=form.cleaned_data["roles"],
+                    reason=form.cleaned_data["reason"],
+                    current_session_key=(
+                        request.session.session_key
+                        if staff_user.pk == request.user.pk
+                        else None
+                    ),
+                )
+            except ValidationError as exc:
+                form.add_error(None, exc)
+            else:
+                if staff_user.pk == request.user.pk:
+                    request.session.flush()
+                    messages.success(request, "Staff roles updated. Please sign in again.")
+                    return redirect("login")
+                messages.success(request, "Staff roles updated.")
+                return redirect("staff_detail", pk=staff_user.pk)
     else:
-        form = RoleAssignmentForm(initial={"roles": staff_user.groups.all()})
+        form = RoleAssignmentForm(initial={"roles": staff_user.groups.all()}, actor=request.user)
     return render(request, "users/assign_roles.html", {"staff_user": staff_user, "form": form})
 
 
@@ -92,4 +97,3 @@ class AuditedPasswordChangeView(PasswordChangeView):
 
 
 audited_password_change = login_required(AuditedPasswordChangeView.as_view())
-

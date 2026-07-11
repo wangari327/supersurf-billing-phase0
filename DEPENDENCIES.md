@@ -20,7 +20,7 @@ Phase 1 installed only foundation dependencies. Exact versions are pinned in `uv
 | Vulnerability scan | pip-audit 2.10.1 | Apache-2.0 | Installed |
 | Licence report | pip-licenses 5.5.5 | MIT | Installed |
 | CSS build | Tailwind CSS 4.1.17 and @tailwindcss/cli 4.1.17 | MIT | Installed via npm |
-| Optional reverse proxy | Caddy 2 image | Apache-2.0 | Optional Compose profile only |
+| Optional reverse proxy | Caddy 2 image | Apache-2.0 | Local preview Compose profile only; not a production WSGI stack |
 
 ## Not Yet Adopted
 

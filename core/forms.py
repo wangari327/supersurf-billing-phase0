@@ -15,17 +15,11 @@ class OrganizationForm(forms.ModelForm):
             "network_label",
             "support_label",
             "portal_label",
-            "registered_business_name",
             "domain",
             "support_email",
             "billing_email",
             "noc_email",
             "support_phone",
-            "paybill_number",
-            "till_number",
-            "kra_pin",
-            "registration_number",
-            "communications_authority_licence",
         ]
         widgets = {
             "primary_brand": forms.TextInput(attrs={"class": "field"}),
@@ -34,18 +28,39 @@ class OrganizationForm(forms.ModelForm):
             "network_label": forms.TextInput(attrs={"class": "field"}),
             "support_label": forms.TextInput(attrs={"class": "field"}),
             "portal_label": forms.TextInput(attrs={"class": "field"}),
-            "registered_business_name": forms.TextInput(attrs={"class": "field"}),
             "domain": forms.TextInput(attrs={"class": "field"}),
             "support_email": forms.EmailInput(attrs={"class": "field"}),
             "billing_email": forms.EmailInput(attrs={"class": "field"}),
             "noc_email": forms.EmailInput(attrs={"class": "field"}),
             "support_phone": forms.TextInput(attrs={"class": "field"}),
+        }
+
+
+class SensitiveOrganizationForm(forms.ModelForm):
+    class Meta:
+        model = Organization
+        fields = [
+            "registered_business_name",
+            "paybill_number",
+            "till_number",
+            "kra_pin",
+            "registration_number",
+            "communications_authority_licence",
+        ]
+        widgets = {
+            "registered_business_name": forms.TextInput(attrs={"class": "field"}),
             "paybill_number": forms.TextInput(attrs={"class": "field"}),
             "till_number": forms.TextInput(attrs={"class": "field"}),
             "kra_pin": forms.TextInput(attrs={"class": "field"}),
             "registration_number": forms.TextInput(attrs={"class": "field"}),
             "communications_authority_licence": forms.TextInput(attrs={"class": "field"}),
         }
+
+    def __init__(self, *args, can_change: bool = False, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if not can_change:
+            for field in self.fields.values():
+                field.disabled = True
 
 
 class BrandingForm(forms.ModelForm):

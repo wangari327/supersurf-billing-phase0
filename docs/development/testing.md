@@ -15,6 +15,7 @@ Run production-profile Django deployment checks with a check-only secret:
 $env:SUPERSURF_ENVIRONMENT="PRODUCTION"
 $env:DJANGO_DEBUG="false"
 $env:DJANGO_SECRET_KEY="prod-check-9a7bc25f-df43-43bb-b84e-1cf3ee701e6b-Xq84rL9mVz27"
+$env:DATABASE_URL="postgres://supersurf:supersurf@localhost:5432/supersurf"
 $env:DJANGO_ALLOWED_HOSTS="supersurf.localhost"
 $env:DJANGO_CSRF_TRUSTED_ORIGINS="https://supersurf.localhost"
 uv run python manage.py check --deploy --fail-level WARNING
@@ -37,4 +38,3 @@ uv run pytest tests/test_auth_and_browser.py
 ```
 
 On the development machine, the Playwright browser download timed out, so the smoke test uses local Chrome as a fallback. CI installs Chromium explicitly.
-

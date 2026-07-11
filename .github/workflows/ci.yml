@@ -53,6 +53,7 @@ jobs:
           SUPERSURF_ENVIRONMENT: PRODUCTION
           DJANGO_DEBUG: "false"
           DJANGO_SECRET_KEY: prod-check-9a7bc25f-df43-43bb-b84e-1cf3ee701e6b-Xq84rL9mVz27
+          DATABASE_URL: postgres://supersurf:supersurf@localhost:5432/supersurf
           DJANGO_ALLOWED_HOSTS: supersurf.localhost
           DJANGO_CSRF_TRUSTED_ORIGINS: https://supersurf.localhost
         run: uv run python manage.py check --deploy --fail-level WARNING
@@ -70,4 +71,3 @@ jobs:
 
       - name: Licence report
         run: uv run pip-licenses --format=markdown --with-system
-

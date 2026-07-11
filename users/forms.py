@@ -4,7 +4,7 @@ from django import forms
 from django.contrib.auth.models import Group
 
 from .models import User
-from .roles import ROLE_NAMES
+from .roles import ROLE_NAMES, ROLE_OWNER, is_owner
 
 
 class StaffSearchForm(forms.Form):
@@ -27,9 +27,12 @@ class RoleAssignmentForm(forms.Form):
         help_text="Required for role changes.",
     )
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, actor=None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.fields["roles"].queryset = Group.objects.filter(name__in=ROLE_NAMES).order_by("name")
+        roles = Group.objects.filter(name__in=ROLE_NAMES)
+        if not self.is_bound and not is_owner(actor):
+            roles = roles.exclude(name=ROLE_OWNER)
+        self.fields["roles"].queryset = roles.order_by("name")
 
 
 class StaffProfileForm(forms.ModelForm):

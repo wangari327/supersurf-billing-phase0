@@ -2,7 +2,7 @@
 
 SuperSurf Billing is a planned Kenya-first ISP billing and subscriber-management platform for SuperSurf.
 
-This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, and the Phase 1 lean Django foundation.
+This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, and the Phase 1.1 security-hardening correction.
 
 Phase 1 deliberately includes only `core`, `users`, and `audit` Django apps. It does not include M-PESA implementation, subscriber billing, wallets, ledger transactions, FreeRADIUS provisioning, PPPoE, RouterOS integration, or live network actions.
 
@@ -32,7 +32,8 @@ Phase 1 deliberately includes only `core`, `users`, and `audit` Django apps. It 
 - Operator shell pages
 - Health and readiness endpoints
 - Minimal Celery broker/worker wiring
-- Docker Compose definitions for web, PostgreSQL, Valkey broker, worker, and scheduler
+- Development-only Docker Compose definitions for web, PostgreSQL, Valkey broker, worker, and scheduler
+- Phase 1.1 security hardening for redaction, role boundaries, admin bypass prevention, sensitive settings permissions, production fail-closed settings, and audit append-only behavior
 - GitHub Actions CI
 
 ## Phase Boundary
@@ -85,4 +86,3 @@ Start with:
 ## Production Readiness
 
 This bundle does not claim KRA, VAT, eTIMS, Communications Authority, data protection, payment-processing, or network-compliance certification. Those require separate reviewed implementation, testing, and legal or regulatory review where applicable.
-

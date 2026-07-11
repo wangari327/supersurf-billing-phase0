@@ -3,14 +3,21 @@ from __future__ import annotations
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.db import connection
+from django.core.exceptions import PermissionDenied
+from django.db import connection, transaction
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
 from audit.service import record_event
 
-from .forms import BrandingForm, OrganizationForm
-from .services import get_or_create_default_organization, production_readiness_issues
+from .forms import BrandingForm, OrganizationForm, SensitiveOrganizationForm
+from .services import (
+    default_organization_seeded,
+    get_or_create_default_organization,
+    production_readiness_issues,
+)
+
+SENSITIVE_ORGANIZATION_FIELDS = set(SensitiveOrganizationForm.Meta.fields)
 
 
 @login_required
@@ -46,13 +53,35 @@ def dashboard(request):
 def organization_settings(request):
     organization = get_or_create_default_organization()
     branding = organization.branding
+    can_view_sensitive = request.user.has_perm("core.view_sensitive_settings")
+    can_change_sensitive = request.user.has_perm("core.change_sensitive_settings")
     if request.method == "POST":
+        if SENSITIVE_ORGANIZATION_FIELDS.intersection(request.POST) and not can_change_sensitive:
+            raise PermissionDenied("Changing sensitive settings requires explicit permission.")
         organization_form = OrganizationForm(request.POST, instance=organization)
         branding_form = BrandingForm(request.POST, instance=branding)
-        if organization_form.is_valid() and branding_form.is_valid():
-            changed_fields = list(organization_form.changed_data + branding_form.changed_data)
-            organization_form.save()
-            branding_form.save()
+        sensitive_form = (
+            SensitiveOrganizationForm(
+                request.POST,
+                instance=organization,
+                can_change=can_change_sensitive,
+            )
+            if can_change_sensitive
+            else None
+        )
+        sensitive_valid = sensitive_form is None or sensitive_form.is_valid()
+        if organization_form.is_valid() and branding_form.is_valid() and sensitive_valid:
+            sensitive_changed_fields = sensitive_form.changed_data if sensitive_form else []
+            changed_fields = list(
+                organization_form.changed_data
+                + branding_form.changed_data
+                + sensitive_changed_fields
+            )
+            with transaction.atomic():
+                organization_form.save()
+                branding_form.save()
+                if sensitive_form:
+                    sensitive_form.save()
             record_event(
                 action="organization.settings.changed",
                 request=request,
@@ -62,9 +91,15 @@ def organization_settings(request):
             )
             messages.success(request, "SuperSurf settings updated.")
             return redirect("organization_settings")
+        visible_sensitive_form = sensitive_form if can_view_sensitive else None
     else:
         organization_form = OrganizationForm(instance=organization)
         branding_form = BrandingForm(instance=branding)
+        visible_sensitive_form = (
+            SensitiveOrganizationForm(instance=organization, can_change=can_change_sensitive)
+            if can_view_sensitive
+            else None
+        )
 
     return render(
         request,
@@ -73,6 +108,8 @@ def organization_settings(request):
             "organization": organization,
             "organization_form": organization_form,
             "branding_form": branding_form,
+            "sensitive_form": visible_sensitive_form,
+            "can_change_sensitive_settings": can_change_sensitive,
             "issues": production_readiness_issues(organization),
         },
     )
@@ -95,10 +132,11 @@ def readyz(request):
         status_code = 503
 
     try:
-        organization = get_or_create_default_organization()
-        checks["organization"] = "ok" if organization.pk else "error"
+        checks["organization_seed"] = "ok" if default_organization_seeded() else "missing"
+        if checks["organization_seed"] != "ok":
+            status_code = 503
     except Exception:
-        checks["organization"] = "error"
+        checks["organization_seed"] = "error"
         status_code = 503
 
     return JsonResponse(
@@ -110,14 +148,15 @@ def readyz(request):
 @login_required
 def system_health(request):
     organization = get_or_create_default_organization()
-    broker_status = "configured" if settings.BROKER_URL else "not configured"
+    broker_status = (
+        "configured; reachability not checked here" if settings.BROKER_URL else "not configured"
+    )
     return render(
         request,
         "core/system_health.html",
         {
             "organization": organization,
             "database_engine": connection.vendor,
-            "broker_url": settings.BROKER_URL,
             "broker_status": broker_status,
             "issues": production_readiness_issues(organization),
         },

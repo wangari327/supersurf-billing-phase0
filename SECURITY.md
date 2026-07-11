@@ -22,6 +22,12 @@ Security requirements in this document are binding for later phases unless expli
 - Local secret scanning script
 - GitHub Actions for tests, checks, secret scanning, vulnerability scanning, and licence report
 
+## Audit Immutability Boundary
+
+Phase 1.1 rejects application-level `AuditEvent` instance updates, deletes, queryset `update()`, queryset `delete()`, and `bulk_update()`. The Django admin is read-only for audit events.
+
+This is not database-level immutability. Database administrators, direct SQL access, compromised database credentials, or filesystem-level database access can still alter records. Stronger database-level immutability, retention controls, and backup verification should be reviewed before financial workflows begin.
+
 ## Sensitive Data
 
 Sensitive values include:

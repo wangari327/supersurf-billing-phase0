@@ -1,7 +1,8 @@
+# Local TLS/reverse-proxy preview only. This profile does not make runserver production-ready.
 services:
   caddy:
     image: caddy:2-alpine
-    profiles: ["caddy"]
+    profiles: ["local-tls-preview"]
     ports:
       - "8080:80"
     volumes:

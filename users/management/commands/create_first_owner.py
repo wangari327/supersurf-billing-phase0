@@ -3,6 +3,7 @@ from __future__ import annotations
 import getpass
 import os
 
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 
@@ -28,10 +29,12 @@ class Command(BaseCommand):
             password = getpass.getpass("Initial owner password: ")
         if not password:
             raise CommandError("Owner password was not supplied.")
-        user = create_owner_user(
-            username=options["username"],
-            email=options["email"],
-            password=password,
-        )
+        try:
+            user = create_owner_user(
+                username=options["username"],
+                email=options["email"],
+                password=password,
+            )
+        except ValidationError as exc:
+            raise CommandError("; ".join(exc.messages)) from exc
         self.stdout.write(self.style.SUCCESS(f"Created Owner user {user.username}."))
-

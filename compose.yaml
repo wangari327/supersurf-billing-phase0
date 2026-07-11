@@ -1,3 +1,5 @@
+# Development-only Compose stack for Phase 1.
+# The web service intentionally uses Django runserver and is not production-ready.
 services:
   web:
     build: .

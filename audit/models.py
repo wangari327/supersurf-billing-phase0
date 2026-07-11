@@ -4,6 +4,29 @@ from django.conf import settings
 from django.db import models
 
 
+class AuditEventQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "AuditEvent records cannot be updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "AuditEvent records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "AuditEvent records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class AuditEventManager(models.Manager):
+    def get_queryset(self):
+        return AuditEventQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "AuditEvent records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
 class AuditEvent(models.Model):
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -21,6 +44,8 @@ class AuditEvent(models.Model):
     result = models.CharField(max_length=40, default="success")
     reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AuditEventManager()
 
     class Meta:
         ordering = ["-created_at", "-id"]

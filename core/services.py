@@ -15,6 +15,12 @@ def get_or_create_default_organization() -> Organization:
     return organization
 
 
+def default_organization_seeded() -> bool:
+    return Organization.objects.filter(pk=1).exists() and OrganizationBranding.objects.filter(
+        organization_id=1
+    ).exists()
+
+
 def production_readiness_issues(organization: Organization) -> list[ReadinessIssue]:
     issues: list[ReadinessIssue] = []
     if settings.SUPERSURF_ENVIRONMENT == "PRODUCTION":
@@ -46,4 +52,3 @@ def environment_badge_colour() -> str:
         "LAB": "bg-amber-50 text-amber-900 ring-amber-700/20",
         "PRODUCTION": "bg-rose-50 text-rose-800 ring-rose-700/20",
     }.get(settings.SUPERSURF_ENVIRONMENT, "bg-slate-50 text-slate-800 ring-slate-700/20")
-

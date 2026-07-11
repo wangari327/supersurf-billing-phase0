@@ -1,3 +1,5 @@
+# Local reverse-proxy preview for the development Compose stack.
+# Do not treat Django runserver behind this Caddyfile as production-ready.
 :80 {
     encode gzip
     reverse_proxy web:8000

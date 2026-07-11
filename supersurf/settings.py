@@ -4,7 +4,13 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+DEVELOPMENT_SECRET_KEY = "dev-only-insecure-supersurf-key"
+SUPPORTED_ENVIRONMENTS = {"DEVELOPMENT", "TEST", "LAB", "PRODUCTION"}
+FALSE_VALUES = {"0", "false", "no", "off"}
+TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def env(name: str, default: str = "") -> str:
@@ -15,22 +21,68 @@ def env_bool(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    normalized = value.strip().lower()
+    if normalized in TRUE_VALUES:
+        return True
+    if normalized in FALSE_VALUES:
+        return False
+    return default
 
 
 def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in env(name, default).split(",") if item.strip()]
 
 
+def environment_label() -> str:
+    configured = env("SUPERSURF_ENVIRONMENT", "DEVELOPMENT").upper()
+    if configured not in SUPPORTED_ENVIRONMENTS:
+        return "DEVELOPMENT"
+    return configured
+
+
+SUPERSURF_ENVIRONMENT = environment_label()
+
+
+def validate_production_environment() -> None:
+    if SUPERSURF_ENVIRONMENT != "PRODUCTION":
+        return
+
+    required = [
+        "DJANGO_SECRET_KEY",
+        "DATABASE_URL",
+        "DJANGO_ALLOWED_HOSTS",
+        "DJANGO_CSRF_TRUSTED_ORIGINS",
+        "DJANGO_DEBUG",
+    ]
+    missing = [name for name in required if not env(name).strip()]
+    if missing:
+        msg = "Missing required production setting(s): " + ", ".join(missing)
+        raise ImproperlyConfigured(msg)
+
+    if env("DJANGO_SECRET_KEY") == DEVELOPMENT_SECRET_KEY:
+        msg = "DJANGO_SECRET_KEY must not use the development fallback in production."
+        raise ImproperlyConfigured(msg)
+
+    if env("DJANGO_DEBUG").strip().lower() not in FALSE_VALUES:
+        msg = "DJANGO_DEBUG must be explicitly false in production."
+        raise ImproperlyConfigured(msg)
+
+
+validate_production_environment()
+
+
 def database_config() -> dict[str, object]:
     database_url = env("DATABASE_URL")
     if not database_url:
+        if SUPERSURF_ENVIRONMENT == "PRODUCTION":
+            msg = "DATABASE_URL must be supplied in production."
+            raise ImproperlyConfigured(msg)
         return {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 
     parsed = urlparse(database_url)
     if parsed.scheme not in {"postgres", "postgresql"}:
-        msg = f"Unsupported DATABASE_URL scheme: {parsed.scheme}"
-        raise ValueError(msg)
+        msg = "DATABASE_URL must use PostgreSQL."
+        raise ImproperlyConfigured(msg)
 
     return {
         "ENGINE": "django.db.backends.postgresql",
@@ -42,14 +94,17 @@ def database_config() -> dict[str, object]:
     }
 
 
-SECRET_KEY = env("DJANGO_SECRET_KEY", "dev-only-insecure-supersurf-key")
-DEBUG = env_bool("DJANGO_DEBUG", default=True)
-ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+SECRET_KEY = (
+    env("DJANGO_SECRET_KEY")
+    if SUPERSURF_ENVIRONMENT == "PRODUCTION"
+    else env("DJANGO_SECRET_KEY", DEVELOPMENT_SECRET_KEY)
+)
+DEBUG = env_bool("DJANGO_DEBUG", default=SUPERSURF_ENVIRONMENT != "PRODUCTION")
+ALLOWED_HOSTS = env_list(
+    "DJANGO_ALLOWED_HOSTS",
+    "" if SUPERSURF_ENVIRONMENT == "PRODUCTION" else "localhost,127.0.0.1",
+)
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
-
-SUPERSURF_ENVIRONMENT = env("SUPERSURF_ENVIRONMENT", "DEVELOPMENT").upper()
-if SUPERSURF_ENVIRONMENT not in {"DEVELOPMENT", "TEST", "LAB", "PRODUCTION"}:
-    SUPERSURF_ENVIRONMENT = "DEVELOPMENT"
 
 INSTALLED_APPS = [
     "django.contrib.admin",

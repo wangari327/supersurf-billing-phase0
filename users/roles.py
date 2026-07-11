@@ -23,7 +23,6 @@ ROLE_PERMISSION_CODENAMES = {
         "core.change_organization",
         "core.view_organizationbranding",
         "core.change_organizationbranding",
-        "core.view_sensitive_settings",
         "users.view_user",
         "users.change_user",
         "users.assign_roles",
@@ -55,4 +54,3 @@ ROLE_PERMISSION_CODENAMES = {
 
 def is_owner(user) -> bool:
     return bool(user and user.is_authenticated and user.groups.filter(name=ROLE_OWNER).exists())
-

@@ -29,10 +29,12 @@
       <p class="text-sm text-slate-600">Email</p>
       <p class="mt-1 text-lg font-semibold">{{ subscriber.email|default:"-" }}</p>
     </div>
-    <div class="card p-4">
-      <p class="text-sm text-slate-600">Services</p>
-      <p class="mt-1 text-lg font-semibold">{{ subscriber.services.count }}</p>
-    </div>
+    {% if can_view_services %}
+      <div class="card p-4">
+        <p class="text-sm text-slate-600">Services</p>
+        <p class="mt-1 text-lg font-semibold">{{ subscriber.services.count }}</p>
+      </div>
+    {% endif %}
   </div>
 
   <div class="mt-6 flex flex-wrap gap-2">
@@ -40,7 +42,7 @@
     {% if perms.subscribers.change_subscriber %}
       <a class="btn" href="{% url 'subscriber_edit' subscriber.pk %}">Edit subscriber</a>
     {% endif %}
-    {% if perms.subscribers.add_service %}
+    {% if can_add_service %}
       <a class="btn btn-primary" href="{% url 'service_create' subscriber.pk %}">Add service</a>
     {% endif %}
   </div>
@@ -70,67 +72,69 @@
     </div>
   {% endif %}
 
-  <section class="mt-8">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <h2 class="text-xl font-semibold">Services</h2>
-      {% if perms.subscribers.add_service %}
-        <a class="btn" href="{% url 'service_create' subscriber.pk %}">Add service</a>
-      {% endif %}
-    </div>
+  {% if can_view_services %}
+    <section class="mt-8">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-xl font-semibold">Services</h2>
+        {% if can_add_service %}
+          <a class="btn" href="{% url 'service_create' subscriber.pk %}">Add service</a>
+        {% endif %}
+      </div>
 
-    <div class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
-      {% if subscriber.services.all %}
-        <table class="min-w-full divide-y divide-slate-200 text-sm">
-          <thead class="bg-slate-50">
-            <tr>
-              <th class="px-4 py-3 text-left">Reference</th>
-              <th class="px-4 py-3 text-left">Label</th>
-              <th class="px-4 py-3 text-left">Status</th>
-              <th class="px-4 py-3 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-200">
-            {% for service in subscriber.services.all %}
+      <div class="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+        {% if subscriber.services.all %}
+          <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50">
               <tr>
-                <td class="px-4 py-3 font-medium">{{ service.service_reference }}</td>
-                <td class="px-4 py-3">{{ service.label }}</td>
-                <td class="px-4 py-3">
-                  {% if service.is_active %}
-                    <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Active</span>
-                  {% else %}
-                    <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Inactive</span>
-                  {% endif %}
-                </td>
-                <td class="px-4 py-3">
-                  {% if perms.subscribers.change_service %}
-                    <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                      <a class="btn" href="{% url 'service_edit' service.pk %}">Edit</a>
-                      {% if service.is_active %}
-                        <form method="post" action="{% url 'service_deactivate' service.pk %}" class="flex flex-col gap-2 sm:flex-row">
-                          {% csrf_token %}
-                          <input class="field min-w-64" name="reason" placeholder="Reason" required>
-                          <button class="btn" type="submit">Deactivate</button>
-                        </form>
-                      {% else %}
-                        <form method="post" action="{% url 'service_reactivate' service.pk %}" class="flex flex-col gap-2 sm:flex-row">
-                          {% csrf_token %}
-                          <input class="field min-w-64" name="reason" placeholder="Reason" required>
-                          <button class="btn btn-primary" type="submit">Reactivate</button>
-                        </form>
-                      {% endif %}
-                    </div>
-                  {% else %}
-                    <span class="text-slate-500">-</span>
-                  {% endif %}
-                </td>
+                <th class="px-4 py-3 text-left">Reference</th>
+                <th class="px-4 py-3 text-left">Label</th>
+                <th class="px-4 py-3 text-left">Status</th>
+                <th class="px-4 py-3 text-left">Actions</th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="p-6 text-sm text-slate-600">No services have been registered for this subscriber.</p>
-      {% endif %}
-    </div>
-  </section>
+            </thead>
+            <tbody class="divide-y divide-slate-200">
+              {% for service in subscriber.services.all %}
+                <tr>
+                  <td class="px-4 py-3 font-medium">{{ service.service_reference }}</td>
+                  <td class="px-4 py-3">{% if service.label %}{{ service.label }}{% else %}&mdash;{% endif %}</td>
+                  <td class="px-4 py-3">
+                    {% if service.is_active %}
+                      <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Active</span>
+                    {% else %}
+                      <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Inactive</span>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-3">
+                    {% if can_change_service %}
+                      <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                        <a class="btn" href="{% url 'service_edit' service.pk %}">Edit</a>
+                        {% if service.is_active %}
+                          <form method="post" action="{% url 'service_deactivate' service.pk %}" class="flex flex-col gap-2 sm:flex-row">
+                            {% csrf_token %}
+                            <input class="field min-w-64" name="reason" placeholder="Reason" required>
+                            <button class="btn" type="submit">Deactivate</button>
+                          </form>
+                        {% else %}
+                          <form method="post" action="{% url 'service_reactivate' service.pk %}" class="flex flex-col gap-2 sm:flex-row">
+                            {% csrf_token %}
+                            <input class="field min-w-64" name="reason" placeholder="Reason" required>
+                            <button class="btn btn-primary" type="submit">Reactivate</button>
+                          </form>
+                        {% endif %}
+                      </div>
+                    {% else %}
+                      <span class="text-slate-500">-</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="p-6 text-sm text-slate-600">No services have been registered for this subscriber.</p>
+        {% endif %}
+      </div>
+    </section>
+  {% endif %}
 </section>
 {% endblock %}

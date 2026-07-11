@@ -66,7 +66,7 @@ A future PPPoE username convention may lowercase the service reference, for exam
 - protected subscriber foreign key
 - immutable service number
 - immutable service reference
-- label
+- optional label, trimmed and limited to 120 characters
 - active flag
 - creation and update timestamps
 
@@ -104,6 +104,8 @@ There are no delete routes. Normal workflows deactivate and reactivate subscribe
 - Administrator receives view, add, and change permissions for subscribers and services.
 - Finance, NOC, SuperSurf Support, and Read Only receive view permissions for subscribers and services.
 - Ordinary roles do not receive delete permissions.
+
+Subscriber profile data requires `subscribers.view_subscriber`. Service data is a separate visibility surface and requires `subscribers.view_service`. A user with subscriber view but not service view can open subscriber list and detail pages, but must not see service references, labels, statuses, service lists, service counts, service-reference search results, or dashboard service counts.
 
 ## Audit
 

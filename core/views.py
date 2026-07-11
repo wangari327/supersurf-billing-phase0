@@ -28,6 +28,7 @@ def dashboard(request):
     issues = production_readiness_issues(organization)
     can_view_packages = request.user.has_perm("billing.view_plan")
     can_view_subscribers = request.user.has_perm("subscribers.view_subscriber")
+    can_view_services = request.user.has_perm("subscribers.view_service")
     package_summary = None
     subscriber_summary = None
     if can_view_packages:
@@ -39,9 +40,12 @@ def dashboard(request):
         subscriber_summary = {
             "active_subscribers": Subscriber.objects.filter(is_active=True).count(),
             "inactive_subscribers": Subscriber.objects.filter(is_active=False).count(),
-            "active_services": Service.objects.filter(is_active=True).count(),
-            "inactive_services": Service.objects.filter(is_active=False).count(),
         }
+        if can_view_services:
+            subscriber_summary["active_services"] = Service.objects.filter(is_active=True).count()
+            subscriber_summary["inactive_services"] = Service.objects.filter(
+                is_active=False
+            ).count()
     return render(
         request,
         "core/dashboard.html",
@@ -62,6 +66,7 @@ def dashboard(request):
             ],
             "package_summary": package_summary,
             "subscriber_summary": subscriber_summary,
+            "can_view_services": can_view_services,
         },
     )
 

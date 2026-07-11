@@ -28,6 +28,11 @@ class SubscriberSearchForm(forms.Form):
         widget=forms.Select(attrs={"class": "field"}),
     )
 
+    def __init__(self, *args, can_view_services: bool = False, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if not can_view_services:
+            self.fields["q"].widget.attrs["placeholder"] = "Search account, name, or phone"
+
 
 class SubscriberForm(forms.ModelForm):
     reason = forms.CharField(
@@ -73,8 +78,9 @@ class ServiceForm(forms.ModelForm):
             "label": forms.TextInput(attrs={"class": "field"}),
         }
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["label"].required = False
+
     def clean_label(self) -> str:
-        label = self.cleaned_data["label"].strip()
-        if not label:
-            raise ValidationError("Service label is required.")
-        return label
+        return self.cleaned_data.get("label", "").strip()

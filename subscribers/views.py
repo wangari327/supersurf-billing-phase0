@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import ValidationError
@@ -19,9 +21,11 @@ from .services import (
     update_subscriber,
 )
 
+SERVICE_REFERENCE_RE = re.compile(r"^SS\d{6}-\d{2}$", re.IGNORECASE)
 
-def _query_string_without_page(request) -> str:
-    query_params = request.GET.copy()
+
+def _query_string_without_page(query_params) -> str:
+    query_params = query_params.copy()
     query_params.pop("page", None)
     return query_params.urlencode()
 
@@ -29,20 +33,36 @@ def _query_string_without_page(request) -> str:
 @login_required
 @permission_required("subscribers.view_subscriber", raise_exception=True)
 def subscriber_list(request):
-    form = SubscriberSearchForm(request.GET)
-    subscribers = Subscriber.objects.annotate(service_count=Count("services", distinct=True))
+    can_view_services = request.user.has_perm("subscribers.view_service")
+    form_data = request.GET.copy()
+    form = SubscriberSearchForm(form_data, can_view_services=can_view_services)
+    subscribers = Subscriber.objects.all()
+    if can_view_services:
+        subscribers = subscribers.annotate(service_count=Count("services", distinct=True))
     query = ""
     status = ""
+    safe_query_params = request.GET.copy()
     if form.is_valid():
         query = form.cleaned_data["q"].strip()
         status = form.cleaned_data["status"]
-        if query:
-            subscribers = subscribers.filter(
+        hidden_service_reference_query = (
+            bool(query) and not can_view_services and SERVICE_REFERENCE_RE.fullmatch(query)
+        )
+        if hidden_service_reference_query:
+            subscribers = subscribers.none()
+            query = ""
+            form_data["q"] = ""
+            safe_query_params.pop("q", None)
+            form = SubscriberSearchForm(form_data, can_view_services=can_view_services)
+        elif query:
+            search_filter = (
                 Q(account_number__icontains=query)
                 | Q(display_name__icontains=query)
                 | Q(primary_phone__icontains=query)
-                | Q(services__service_reference__icontains=query)
-            ).distinct()
+            )
+            if can_view_services:
+                search_filter |= Q(services__service_reference__icontains=query)
+            subscribers = subscribers.filter(search_filter).distinct()
         if status == "active":
             subscribers = subscribers.filter(is_active=True)
         elif status == "inactive":
@@ -57,7 +77,8 @@ def subscriber_list(request):
             "page": page,
             "query": query,
             "status": status,
-            "query_string": _query_string_without_page(request),
+            "query_string": _query_string_without_page(safe_query_params),
+            "can_view_services": can_view_services,
         },
     )
 
@@ -65,11 +86,23 @@ def subscriber_list(request):
 @login_required
 @permission_required("subscribers.view_subscriber", raise_exception=True)
 def subscriber_detail(request, pk):
-    subscriber = get_object_or_404(
-        Subscriber.objects.prefetch_related("services"),
-        pk=pk,
+    can_view_services = request.user.has_perm("subscribers.view_service")
+    can_add_service = request.user.has_perm("subscribers.add_service")
+    can_change_service = request.user.has_perm("subscribers.change_service")
+    subscribers = Subscriber.objects.all()
+    if can_view_services:
+        subscribers = subscribers.prefetch_related("services")
+    subscriber = get_object_or_404(subscribers, pk=pk)
+    return render(
+        request,
+        "subscribers/subscriber_detail.html",
+        {
+            "subscriber": subscriber,
+            "can_view_services": can_view_services,
+            "can_add_service": can_add_service,
+            "can_change_service": can_change_service,
+        },
     )
-    return render(request, "subscribers/subscriber_detail.html", {"subscriber": subscriber})
 
 
 @login_required

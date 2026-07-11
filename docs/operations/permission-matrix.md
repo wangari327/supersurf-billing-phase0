@@ -15,4 +15,6 @@ Only an existing Owner may grant the Owner role, remove the Owner role, or modif
 
 Ordinary roles do not receive `billing.delete_plan`, `subscribers.delete_subscriber`, or `subscribers.delete_service`. Packages, subscribers, and services are deactivated rather than deleted through normal workflows.
 
+Subscriber profile visibility and service visibility are separate permission checks. `subscribers.view_subscriber` allows subscriber list and detail access; `subscribers.view_service` is required before service references, optional labels, statuses, lists, counts, service-reference search results, or dashboard service counts are shown. Service labels are optional, trimmed, and limited to 120 characters.
+
 Later phases must refine these permissions before adding support tickets, subscriptions, payments, RADIUS, PPPoE credentials, RouterOS actions, or provisioning actions.

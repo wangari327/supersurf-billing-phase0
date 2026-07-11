@@ -156,7 +156,7 @@ class Service(models.Model):
             )
         ],
     )
-    label = models.CharField(max_length=160)
+    label = models.CharField(max_length=120, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -187,8 +187,6 @@ class Service(models.Model):
     def clean(self) -> None:
         super().clean()
         self.label = self.label.strip()
-        if not self.label:
-            raise ValidationError({"label": "Service label is required."})
         if self.service_number is not None and not 1 <= self.service_number <= 99:
             raise ValidationError({"service_number": "Service number must be between 1 and 99."})
         if self.subscriber_id and self.service_number and self.service_reference:

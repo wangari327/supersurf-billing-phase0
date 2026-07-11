@@ -38,7 +38,9 @@
             <th class="px-4 py-3 text-left">Name</th>
             <th class="px-4 py-3 text-left">Type</th>
             <th class="px-4 py-3 text-left">Phone</th>
-            <th class="px-4 py-3 text-left">Services</th>
+            {% if can_view_services %}
+              <th class="px-4 py-3 text-left">Services</th>
+            {% endif %}
             <th class="px-4 py-3 text-left">Status</th>
           </tr>
         </thead>
@@ -51,7 +53,9 @@
               <td class="px-4 py-3">{{ subscriber.display_name }}</td>
               <td class="px-4 py-3">{{ subscriber.get_customer_type_display }}</td>
               <td class="px-4 py-3">{{ subscriber.primary_phone }}</td>
-              <td class="px-4 py-3">{{ subscriber.service_count }}</td>
+              {% if can_view_services %}
+                <td class="px-4 py-3">{{ subscriber.service_count }}</td>
+              {% endif %}
               <td class="px-4 py-3">
                 {% if subscriber.is_active %}
                   <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Active</span>

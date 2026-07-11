@@ -38,6 +38,21 @@ def create_staff_with_role(username: str, role_name: str) -> User:
     return user
 
 
+def create_staff_with_subscriber_permissions(username: str, *codenames: str) -> User:
+    user = User.objects.create_user(
+        username=username,
+        password="StrongStaffPass123!",
+        is_staff=True,
+    )
+    permissions = Permission.objects.filter(
+        content_type__app_label="subscribers",
+        codename__in=codenames,
+    )
+    assert permissions.count() == len(codenames)
+    user.user_permissions.add(*permissions)
+    return user
+
+
 def subscriber_payload(**overrides: str) -> dict[str, str]:
     data = {
         "customer_type": Subscriber.CUSTOMER_INDIVIDUAL,
@@ -91,6 +106,60 @@ def test_generated_subscriber_and_service_identifiers_start_at_expected_values()
     assert service.service_number == 1
     assert service.service_reference == "SS000001-01"
     assert service.subscriber == subscriber
+
+
+@pytest.mark.django_db
+def test_service_can_be_created_without_label():
+    subscriber = create_test_subscriber()
+    form = ServiceForm(data={"reason": "No label needed"})
+    assert form.is_valid(), form.errors
+
+    service = create_service(subscriber=subscriber, form=form, actor=None)
+
+    assert service.label == ""
+    assert service.service_reference == "SS000001-01"
+
+
+@pytest.mark.django_db
+def test_blank_service_label_uses_neutral_placeholder(client, seeded_roles):
+    viewer = create_staff_with_subscriber_permissions(
+        "blank-label-viewer",
+        "view_subscriber",
+        "view_service",
+    )
+    subscriber = create_test_subscriber()
+    create_test_service(subscriber, label="")
+
+    client.force_login(viewer)
+    response = client.get(reverse("subscriber_detail", args=[subscriber.pk]))
+
+    assert response.status_code == 200
+    assert "&mdash;" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_service_label_whitespace_is_stored_as_empty_string():
+    subscriber = create_test_subscriber()
+    service = create_test_service(subscriber, label="   ")
+
+    assert service.label == ""
+
+
+@pytest.mark.django_db
+def test_service_label_longer_than_120_characters_is_rejected():
+    form = ServiceForm(data=service_payload(label="x" * 121))
+
+    assert not form.is_valid()
+    assert "label" in form.errors
+
+
+@pytest.mark.django_db
+def test_existing_labeled_services_still_work():
+    subscriber = create_test_subscriber()
+    service = create_test_service(subscriber, label="Office uplink")
+
+    assert service.label == "Office uplink"
+    assert service.service_reference == "SS000001-01"
 
 
 @pytest.mark.django_db
@@ -458,6 +527,88 @@ def test_dashboard_and_navigation_show_subscribers_only_when_authorized(client, 
     assert b"Subscribers" in response.content
     assert b"1 active subscribers" in response.content
     assert b"1 active services" in response.content
+
+
+@pytest.mark.django_db
+def test_view_subscriber_without_view_service_cannot_see_service_information(
+    client,
+    seeded_roles,
+):
+    profile_only_user = create_staff_with_subscriber_permissions(
+        "subscriber-profile-only",
+        "view_subscriber",
+    )
+    subscriber = create_test_subscriber(display_name="Visible Subscriber")
+    service = create_test_service(subscriber, label="Hidden service label")
+
+    client.force_login(profile_only_user)
+    list_response = client.get(reverse("subscriber_list"))
+    assert list_response.status_code == 200
+    list_content = list_response.content.decode()
+    assert subscriber.account_number in list_content
+    assert "Visible Subscriber" in list_content
+    assert "Hidden service label" not in list_content
+    assert service.service_reference not in list_content
+    assert "<th class=\"px-4 py-3 text-left\">Services</th>" not in list_content
+
+    search_response = client.get(reverse("subscriber_list"), {"q": service.service_reference})
+    assert search_response.status_code == 200
+    search_content = search_response.content.decode()
+    assert "No subscribers match the current filters." in search_content
+    assert subscriber.account_number not in search_content
+
+    detail_response = client.get(reverse("subscriber_detail", args=[subscriber.pk]))
+    assert detail_response.status_code == 200
+    detail_content = detail_response.content.decode()
+    assert subscriber.account_number in detail_content
+    assert "Visible Subscriber" in detail_content
+    assert "Hidden service label" not in detail_content
+    assert service.service_reference not in detail_content
+    assert "<h2 class=\"text-xl font-semibold\">Services</h2>" not in detail_content
+    assert "<p class=\"text-sm text-slate-600\">Services</p>" not in detail_content
+
+    dashboard_response = client.get(reverse("dashboard"))
+    assert dashboard_response.status_code == 200
+    dashboard_content = dashboard_response.content.decode()
+    assert "1 active subscribers" in dashboard_content
+    assert "active services" not in dashboard_content
+    assert service.service_reference not in dashboard_content
+
+
+@pytest.mark.django_db
+def test_user_with_subscriber_and_service_view_permissions_sees_service_information(
+    client,
+    seeded_roles,
+):
+    service_viewer = create_staff_with_subscriber_permissions(
+        "subscriber-service-viewer",
+        "view_subscriber",
+        "view_service",
+    )
+    subscriber = create_test_subscriber(display_name="Service Visible Subscriber")
+    service = create_test_service(subscriber, label="Visible service label")
+
+    client.force_login(service_viewer)
+    list_response = client.get(reverse("subscriber_list"), {"q": service.service_reference})
+    assert list_response.status_code == 200
+    list_content = list_response.content.decode()
+    assert subscriber.account_number in list_content
+    assert "<th class=\"px-4 py-3 text-left\">Services</th>" in list_content
+
+    detail_response = client.get(reverse("subscriber_detail", args=[subscriber.pk]))
+    assert detail_response.status_code == 200
+    detail_content = detail_response.content.decode()
+    assert service.service_reference in detail_content
+    assert "Visible service label" in detail_content
+    active_badge = (
+        '<span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">'
+        "Active</span>"
+    )
+    assert active_badge in detail_content
+
+    dashboard_response = client.get(reverse("dashboard"))
+    assert dashboard_response.status_code == 200
+    assert "1 active services" in dashboard_response.content.decode()
 
 
 @pytest.mark.django_db

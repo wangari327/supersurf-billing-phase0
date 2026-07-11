@@ -56,10 +56,12 @@
             {{ subscriber_summary.active_subscribers }} active subscribers,
             {{ subscriber_summary.inactive_subscribers }} inactive subscribers
           </p>
-          <p class="mt-1 text-sm text-slate-600">
-            {{ subscriber_summary.active_services }} active services,
-            {{ subscriber_summary.inactive_services }} inactive services
-          </p>
+          {% if can_view_services %}
+            <p class="mt-1 text-sm text-slate-600">
+              {{ subscriber_summary.active_services }} active services,
+              {{ subscriber_summary.inactive_services }} inactive services
+            </p>
+          {% endif %}
         </div>
         <a class="btn" href="{% url 'subscriber_list' %}">View subscribers</a>
       </div>

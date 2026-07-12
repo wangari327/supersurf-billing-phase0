@@ -10,9 +10,10 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from audit.service import record_event
-from subscribers.models import Service
+from subscribers.models import Service, Subscriber
 
-from .models import BillingPeriod, Plan, Subscription
+from .models import MAX_MONEY_MINOR, BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
+from .money import ksh_to_minor_units
 
 AUDITED_FIELDS = [
     "name",
@@ -39,6 +40,7 @@ BILLING_STATE_EXPIRED = "expired"
 STALE_BILLING_PERIOD_MESSAGE = (
     "The billing period changed while this form was open. Refresh and try again."
 )
+STALE_LEDGER_MESSAGE = "The wallet ledger changed while this form was open. Refresh and try again."
 
 
 def snapshot(plan: Plan) -> dict[str, object]:
@@ -103,6 +105,22 @@ def _billing_period_metadata(period: BillingPeriod, state: str) -> dict[str, obj
         "expires_at": period.expires_at.isoformat(),
         "grace_until": period.grace_until.isoformat(),
         "derived_state": state,
+    }
+
+
+def _ledger_entry_metadata(entry: LedgerEntry) -> dict[str, object]:
+    return {
+        "subscriber_account_number": entry.wallet.subscriber.account_number,
+        "wallet_id": str(entry.wallet_id),
+        "ledger_entry_id": str(entry.pk),
+        "sequence_number": entry.sequence_number,
+        "entry_type": entry.entry_type,
+        "direction": entry.direction,
+        "amount_minor": entry.amount_minor,
+        "balance_after_minor": entry.balance_after_minor,
+        "currency": entry.currency,
+        "reversed_entry_id": str(entry.reverses_entry_id) if entry.reverses_entry_id else "",
+        "created_at": entry.created_at.isoformat() if entry.created_at else "",
     }
 
 
@@ -172,6 +190,16 @@ def _lock_service_and_subscriber(service: Service) -> Service:
     return _lock_service_and_subscriber_by_id(service.pk)
 
 
+def _lock_subscriber(subscriber: Subscriber) -> Subscriber:
+    return Subscriber.objects.select_for_update(of=("self",)).get(pk=subscriber.pk)
+
+
+def _lock_wallet(wallet: Wallet) -> Wallet:
+    return Wallet.objects.select_for_update(of=("self",)).select_related("subscriber").get(
+        pk=wallet.pk
+    )
+
+
 def _lock_current_active_subscription(service: Service) -> Subscription | None:
     return (
         Subscription.objects.select_for_update(of=("self",))
@@ -204,6 +232,13 @@ def _normalize_operation_id(operation_id) -> UUID:
         raise ValidationError("Operation ID is not valid.") from exc
 
 
+def _normalize_ledger_direction(direction: str) -> str:
+    direction = str(direction).strip()
+    if direction not in {LedgerEntry.DIRECTION_CREDIT, LedgerEntry.DIRECTION_DEBIT}:
+        raise ValidationError("Wallet adjustment direction is not valid.")
+    return direction
+
+
 def _normalize_expected_previous_period_id(expected_previous_period_id) -> UUID | None:
     if expected_previous_period_id in {None, ""}:
         return None
@@ -222,6 +257,22 @@ def _validate_reason(reason: str) -> str:
     if not reason:
         raise ValidationError("Reason is required.")
     return reason
+
+
+def _validate_ledger_reason(reason: str) -> str:
+    reason = reason.strip()
+    if not reason:
+        raise ValidationError("Reason is required.")
+    if len(reason) > 240:
+        raise ValidationError("Reason must be 240 characters or fewer.")
+    return reason
+
+
+def _normalize_ledger_amount(amount) -> int:
+    amount_minor = ksh_to_minor_units(amount)
+    if amount_minor > MAX_MONEY_MINOR:
+        raise ValidationError("Amount is too large.")
+    return amount_minor
 
 
 def _validate_aware_timestamp(value, field_name: str):
@@ -296,6 +347,24 @@ def _is_billing_period_conflict(error: IntegrityError) -> bool:
     return "billing_period" in message and ("unique" in message or "duplicate" in message)
 
 
+def _is_ledger_operation_validation_conflict(error: ValidationError) -> bool:
+    return "operation_id" in getattr(error, "error_dict", {})
+
+
+def _is_ledger_conflict(error: IntegrityError) -> bool:
+    diag = getattr(getattr(error, "__cause__", None), "diag", None)
+    constraint_name = getattr(diag, "constraint_name", "")
+    if constraint_name in {
+        "ledger_entry_wallet_sequence_unique",
+        "ledger_entry_previous_single_successor",
+        "billing_ledgerentry_operation_id_key",
+        "billing_ledgerentry_reverses_entry_id_key",
+    }:
+        return True
+    message = str(error).lower()
+    return "ledger" in message and ("unique" in message or "duplicate" in message)
+
+
 def _save_billing_period(period: BillingPeriod) -> BillingPeriod:
     try:
         period.save()
@@ -304,6 +373,137 @@ def _save_billing_period(period: BillingPeriod) -> BillingPeriod:
             raise
         raise ValidationError(STALE_BILLING_PERIOD_MESSAGE) from exc
     return period
+
+
+def _save_wallet(wallet: Wallet) -> Wallet:
+    try:
+        wallet.save()
+    except IntegrityError as exc:
+        message = str(exc).lower()
+        if "wallet" not in message or "unique" not in message:
+            raise
+        raise ValidationError("This subscriber already has a wallet.") from exc
+    return wallet
+
+
+def _save_ledger_entry(entry: LedgerEntry) -> LedgerEntry:
+    try:
+        entry.save()
+    except ValidationError as exc:
+        if not _is_ledger_operation_validation_conflict(exc):
+            raise
+        raise ValidationError(
+            "Operation ID was already used for a different ledger entry."
+        ) from exc
+    except IntegrityError as exc:
+        if not _is_ledger_conflict(exc):
+            raise
+        raise ValidationError(STALE_LEDGER_MESSAGE) from exc
+    return entry
+
+
+def _get_or_create_locked_wallet(subscriber: Subscriber) -> Wallet:
+    try:
+        return Wallet.objects.select_for_update(of=("self",)).get(subscriber=subscriber)
+    except Wallet.DoesNotExist:
+        return _save_wallet(Wallet(subscriber=subscriber))
+
+
+def _lock_latest_ledger_entry(wallet: Wallet) -> LedgerEntry | None:
+    return (
+        LedgerEntry.objects.select_for_update(of=("self",))
+        .filter(wallet_id=wallet.pk)
+        .order_by("-sequence_number")
+        .first()
+    )
+
+
+def _ledger_current_balance(latest_entry: LedgerEntry | None) -> int:
+    if latest_entry is None:
+        return 0
+    return latest_entry.balance_after_minor
+
+
+def _ledger_next_sequence(latest_entry: LedgerEntry | None) -> int:
+    if latest_entry is None:
+        return 1
+    return latest_entry.sequence_number + 1
+
+
+def _ledger_resulting_balance(*, current_balance: int, direction: str, amount_minor: int) -> int:
+    if direction == LedgerEntry.DIRECTION_CREDIT:
+        result = current_balance + amount_minor
+    else:
+        result = current_balance - amount_minor
+    if result < 0:
+        raise ValidationError("Wallet balance cannot become negative.")
+    if result > MAX_MONEY_MINOR:
+        raise ValidationError("Wallet balance is too large.")
+    return result
+
+
+def _manual_entry_type(direction: str) -> str:
+    if direction == LedgerEntry.DIRECTION_CREDIT:
+        return LedgerEntry.ENTRY_MANUAL_CREDIT
+    return LedgerEntry.ENTRY_MANUAL_DEBIT
+
+
+def _opposite_direction(direction: str) -> str:
+    if direction == LedgerEntry.DIRECTION_CREDIT:
+        return LedgerEntry.DIRECTION_DEBIT
+    return LedgerEntry.DIRECTION_CREDIT
+
+
+def _existing_adjustment_operation_result(
+    *,
+    subscriber: Subscriber,
+    operation_id: UUID,
+    entry_type: str,
+    direction: str,
+    amount_minor: int,
+    reason: str,
+) -> LedgerEntry | None:
+    entry = (
+        LedgerEntry.objects.select_related("wallet", "wallet__subscriber")
+        .filter(operation_id=operation_id)
+        .first()
+    )
+    if entry is None:
+        return None
+    if (
+        entry.wallet.subscriber_id == subscriber.pk
+        and entry.entry_type == entry_type
+        and entry.direction == direction
+        and entry.amount_minor == amount_minor
+        and entry.reason == reason
+    ):
+        return entry
+    raise ValidationError("Operation ID was already used for a different ledger entry.")
+
+
+def _existing_reversal_operation_result(
+    *,
+    target: LedgerEntry,
+    operation_id: UUID,
+    direction: str,
+    reason: str,
+) -> LedgerEntry | None:
+    entry = (
+        LedgerEntry.objects.select_related("wallet", "wallet__subscriber", "reverses_entry")
+        .filter(operation_id=operation_id)
+        .first()
+    )
+    if entry is None:
+        return None
+    if (
+        entry.entry_type == LedgerEntry.ENTRY_REVERSAL
+        and entry.reverses_entry_id == target.pk
+        and entry.amount_minor == target.amount_minor
+        and entry.direction == direction
+        and entry.reason == reason
+    ):
+        return entry
+    raise ValidationError("Operation ID was already used for a different ledger entry.")
 
 
 def _assert_billing_period_eligibility(
@@ -370,6 +570,25 @@ def _record_billing_period_event(
         target_type="billing_period",
         target_identifier=period.pk,
         metadata=_billing_period_metadata(period, billing_state_for_service(period.service)),
+        reason=reason,
+    )
+
+
+def _record_ledger_event(
+    *,
+    action: str,
+    entry: LedgerEntry,
+    actor,
+    request: HttpRequest | None,
+    reason: str,
+) -> None:
+    record_event(
+        action=action,
+        actor=actor,
+        request=request,
+        target_type="ledger_entry",
+        target_identifier=entry.pk,
+        metadata=_ledger_entry_metadata(entry),
         reason=reason,
     )
 
@@ -746,3 +965,177 @@ def renew_billing_period(
         reason=reason,
     )
     return period
+
+
+@transaction.atomic
+def post_manual_wallet_adjustment(
+    *,
+    subscriber: Subscriber,
+    direction: str,
+    amount,
+    operation_id,
+    reason: str,
+    actor,
+    request: HttpRequest | None = None,
+) -> LedgerEntry:
+    _require_permission(
+        actor,
+        "subscribers.view_subscriber",
+        "billing.view_wallet",
+        "billing.view_ledgerentry",
+        "billing.add_ledgerentry",
+    )
+    direction = _normalize_ledger_direction(direction)
+    amount_minor = _normalize_ledger_amount(amount)
+    reason = _validate_ledger_reason(reason)
+    operation_uuid = _normalize_operation_id(operation_id)
+    entry_type = _manual_entry_type(direction)
+
+    existing = _existing_adjustment_operation_result(
+        subscriber=subscriber,
+        operation_id=operation_uuid,
+        entry_type=entry_type,
+        direction=direction,
+        amount_minor=amount_minor,
+        reason=reason,
+    )
+    if existing is not None:
+        return existing
+
+    locked_subscriber = _lock_subscriber(subscriber)
+    wallet = _get_or_create_locked_wallet(locked_subscriber)
+    wallet.subscriber = locked_subscriber
+    latest_entry = _lock_latest_ledger_entry(wallet)
+
+    existing = _existing_adjustment_operation_result(
+        subscriber=locked_subscriber,
+        operation_id=operation_uuid,
+        entry_type=entry_type,
+        direction=direction,
+        amount_minor=amount_minor,
+        reason=reason,
+    )
+    if existing is not None:
+        return existing
+
+    current_balance = _ledger_current_balance(latest_entry)
+    balance_after = _ledger_resulting_balance(
+        current_balance=current_balance,
+        direction=direction,
+        amount_minor=amount_minor,
+    )
+    entry = _save_ledger_entry(
+        LedgerEntry(
+            wallet=wallet,
+            sequence_number=_ledger_next_sequence(latest_entry),
+            operation_id=operation_uuid,
+            entry_type=entry_type,
+            direction=direction,
+            amount_minor=amount_minor,
+            balance_after_minor=balance_after,
+            previous_entry=latest_entry,
+            reverses_entry=None,
+            reason=reason,
+            created_by=actor,
+        )
+    )
+    _record_ledger_event(
+        action=f"wallet.{entry_type}",
+        entry=entry,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    return entry
+
+
+@transaction.atomic
+def reverse_ledger_entry(
+    *,
+    entry: LedgerEntry,
+    operation_id,
+    reason: str,
+    actor,
+    request: HttpRequest | None = None,
+) -> LedgerEntry:
+    _require_permission(
+        actor,
+        "subscribers.view_subscriber",
+        "billing.view_wallet",
+        "billing.view_ledgerentry",
+        "billing.add_ledgerentry",
+    )
+    reason = _validate_ledger_reason(reason)
+    operation_uuid = _normalize_operation_id(operation_id)
+    target_lookup = LedgerEntry.objects.select_related("wallet").get(pk=entry.pk)
+    reversal_direction = _opposite_direction(target_lookup.direction)
+
+    existing = _existing_reversal_operation_result(
+        target=target_lookup,
+        operation_id=operation_uuid,
+        direction=reversal_direction,
+        reason=reason,
+    )
+    if existing is not None:
+        return existing
+
+    locked_subscriber = _lock_subscriber(target_lookup.wallet.subscriber)
+    wallet = _lock_wallet(target_lookup.wallet)
+    wallet.subscriber = locked_subscriber
+    latest_entry = _lock_latest_ledger_entry(wallet)
+    locked_target = (
+        LedgerEntry.objects.select_for_update(of=("self",))
+        .select_related("wallet")
+        .get(pk=entry.pk)
+    )
+    if locked_target.wallet_id != wallet.pk:
+        raise ValidationError("Ledger entry no longer belongs to this wallet.")
+    reversal_direction = _opposite_direction(locked_target.direction)
+
+    existing = _existing_reversal_operation_result(
+        target=locked_target,
+        operation_id=operation_uuid,
+        direction=reversal_direction,
+        reason=reason,
+    )
+    if existing is not None:
+        return existing
+    if locked_target.entry_type == LedgerEntry.ENTRY_REVERSAL:
+        raise ValidationError("A reversal cannot reverse another reversal.")
+    if locked_target.entry_type not in {
+        LedgerEntry.ENTRY_MANUAL_CREDIT,
+        LedgerEntry.ENTRY_MANUAL_DEBIT,
+    }:
+        raise ValidationError("Only manual ledger entries can be reversed.")
+    if LedgerEntry.objects.filter(reverses_entry=locked_target).exists():
+        raise ValidationError("This ledger entry has already been reversed.")
+
+    current_balance = _ledger_current_balance(latest_entry)
+    balance_after = _ledger_resulting_balance(
+        current_balance=current_balance,
+        direction=reversal_direction,
+        amount_minor=locked_target.amount_minor,
+    )
+    reversal = _save_ledger_entry(
+        LedgerEntry(
+            wallet=wallet,
+            sequence_number=_ledger_next_sequence(latest_entry),
+            operation_id=operation_uuid,
+            entry_type=LedgerEntry.ENTRY_REVERSAL,
+            direction=reversal_direction,
+            amount_minor=locked_target.amount_minor,
+            balance_after_minor=balance_after,
+            previous_entry=latest_entry,
+            reverses_entry=locked_target,
+            reason=reason,
+            created_by=actor,
+        )
+    )
+    _record_ledger_event(
+        action="wallet.entry_reversed",
+        entry=reversal,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    return reversal

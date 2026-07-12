@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from .models import BillingPeriod, Plan, Subscription
+from .models import BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
 
 
 @admin.register(Plan)
@@ -66,6 +66,59 @@ class BillingPeriodAdmin(admin.ModelAdmin):
     list_filter = ("period_type", "currency")
     search_fields = ("service__service_reference", "plan_name")
     readonly_fields = [field.name for field in BillingPeriod._meta.fields]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+
+@admin.register(Wallet)
+class WalletAdmin(admin.ModelAdmin):
+    list_display = ("subscriber", "currency", "created_at")
+    list_filter = ("currency",)
+    search_fields = ("subscriber__account_number",)
+    readonly_fields = [field.name for field in Wallet._meta.fields]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+
+@admin.register(LedgerEntry)
+class LedgerEntryAdmin(admin.ModelAdmin):
+    list_display = (
+        "wallet",
+        "sequence_number",
+        "entry_type",
+        "direction",
+        "amount_minor",
+        "balance_after_minor",
+        "created_by",
+        "created_at",
+    )
+    list_filter = ("entry_type", "direction", "currency")
+    search_fields = ("wallet__subscriber__account_number", "reason")
+    readonly_fields = [field.name for field in LedgerEntry._meta.fields]
 
     def has_add_permission(self, request) -> bool:
         return False

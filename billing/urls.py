@@ -37,4 +37,19 @@ urlpatterns = [
         views.billing_period_history,
         name="billing_period_history",
     ),
+    path(
+        "subscribers/<uuid:subscriber_pk>/wallet/",
+        views.wallet_detail,
+        name="wallet_detail",
+    ),
+    path(
+        "subscribers/<uuid:subscriber_pk>/wallet/adjustments/",
+        views.wallet_adjustment,
+        name="wallet_adjustment",
+    ),
+    path(
+        "ledger-entries/<uuid:entry_pk>/reverse/",
+        views.ledger_entry_reverse,
+        name="ledger_entry_reverse",
+    ),
 ]

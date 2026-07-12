@@ -91,11 +91,23 @@
 - [x] Tests.
 - [x] Stop for approval.
 
+## Phase 6: Wallet And Append-Only Ledger Foundation
+
+- [x] Account-level wallet model.
+- [x] Append-only ledger entry model.
+- [x] Manual credit workflow.
+- [x] Manual debit workflow.
+- [x] Reversal workflow.
+- [x] Derived wallet balance from latest ledger sequence.
+- [x] Operation ID idempotency.
+- [x] Wallet and ledger permissions.
+- [x] PostgreSQL concurrency tests.
+- [x] Tests.
+- [x] Stop for approval.
+
 ## Future Phase: Billing And Payments
 
 - [ ] Billing charges.
-- [ ] Wallet.
-- [ ] Append-only ledger.
 - [ ] Invoices.
 - [ ] Renewal charges.
 - [ ] Renewal engine.

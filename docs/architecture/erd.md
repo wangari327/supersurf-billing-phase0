@@ -2,18 +2,22 @@
 
 This is a Phase 0.5 logical model, not a production migration.
 
-## Implemented Through Phase 5
+## Implemented Through Phase 6
 
 ```mermaid
 erDiagram
     ORGANIZATION ||--|| ORGANIZATION_BRANDING : has
     STAFF_USER ||--o{ AUDIT_EVENT : causes
     SUBSCRIBER ||--o{ SERVICE : owns
+    SUBSCRIBER ||--o| WALLET : owns
     SERVICE ||--o{ SUBSCRIPTION : has
     SERVICE ||--o{ BILLING_PERIOD : has
     PLAN ||--o{ SUBSCRIPTION : snapshots
     SUBSCRIPTION ||--o{ BILLING_PERIOD : snapshots
     BILLING_PERIOD ||--o| BILLING_PERIOD : precedes
+    WALLET ||--o{ LEDGER_ENTRY : records
+    LEDGER_ENTRY ||--o| LEDGER_ENTRY : precedes
+    LEDGER_ENTRY ||--o| LEDGER_ENTRY : reverses
 
     ORGANIZATION {
         uuid id
@@ -99,9 +103,31 @@ erDiagram
         int grace_period_hours
         datetime created_at
     }
+    WALLET {
+        uuid id
+        uuid subscriber_id
+        string currency
+        datetime created_at
+    }
+    LEDGER_ENTRY {
+        uuid id
+        uuid wallet_id
+        int sequence_number
+        uuid operation_id
+        string entry_type
+        string direction
+        int amount_minor
+        int balance_after_minor
+        string currency
+        uuid previous_entry_id
+        uuid reverses_entry_id
+        string reason
+        int created_by_id
+        datetime created_at
+    }
 ```
 
-`SUBSCRIPTION` is manual package-assignment history. `BILLING_PERIOD` is append-only manual access-period history with subscription snapshots, manual activation and renewal, and derived billing state. Billing periods do not claim payment receipt and do not enforce network access. Billing charges, invoices, discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, wallets, ledgers, installation, and equipment entities remain future work.
+`SUBSCRIPTION` is manual package-assignment history. `BILLING_PERIOD` is append-only manual access-period history with subscription snapshots, manual activation and renewal, and derived billing state. `WALLET` and `LEDGER_ENTRY` are account-level manual accounting records. Manual wallet credits do not claim payment receipt, and manual debits are not package charges or invoices. Billing charges, invoices, discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, installation, and equipment entities remain future work.
 
 ## Future Logical Model
 

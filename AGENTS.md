@@ -4,9 +4,9 @@ This repository is for SuperSurf Billing, a Kenya-first ISP billing and subscrib
 
 ## Current Phase
 
-This repository has completed Phase 0, Phase 0.5, Phase 1 foundation work, Phase 1.1 security hardening, Phase 2 package catalog work, Phase 3 subscriber registry work, Phase 4 package assignment work, and Phase 5 billing-period work.
+This repository has completed Phase 0, Phase 0.5, Phase 1 foundation work, Phase 1.1 security hardening, Phase 2 package catalog work, Phase 3 subscriber registry work, Phase 4 package assignment work, Phase 5 billing-period work, and Phase 6 wallet-ledger work.
 
-Do not begin the next phase, create discount, payment, wallet, ledger, invoice, customer-portal, notification, automatic renewal, automatic expiry, automatic suspension, Celery expiry job, grace-state automation, RADIUS, PPPoE credential, RouterOS, provisioning, installation-fee, equipment-billing, or other network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
+Do not begin the next phase, create discount, payment, Paybill, Till, M-PESA callback, invoice, receipt, renewal-charge, customer-portal, notification, automatic wallet-funded renewal, automatic renewal, automatic expiry, automatic suspension, Celery expiry job, grace-state automation, RADIUS, PPPoE credential, RouterOS, provisioning, installation-fee, equipment-billing, or other network business logic, connect to live routers, or store production credentials until the owner explicitly approves the next phase.
 
 Phase 3 subscriber identifiers are backend generated and immutable:
 
@@ -49,6 +49,8 @@ Phase 3 subscriber phone normalization accepts only Kenya formats in the approve
 Phase 4 subscriptions are manual package-assignment history only. `billing.Subscription` snapshots package terms at assignment time, stores integer KES minor units, permits only `active` and `ended` states, and must not create charges, invoices, renewals, expiry enforcement, payments, wallet or ledger entries, RADIUS rows, PPPoE credentials, RouterOS calls, provisioning jobs, notifications, installation fees, or equipment billing.
 
 Phase 5 billing periods are manual access-period history only. `billing.BillingPeriod` snapshots the active `Subscription`, uses 30-day package periods and the default 24-hour grace from subscription snapshots unless the source package terms differ, derives billing state at read time, and supports manual activation and renewal with operator reasons, operation IDs, and stale-form checks. Early renewal preserves remaining days, grace renewal extends from the original expiry, late renewal starts at the renewal timestamp, and each service has independent periods. Phase 5 must not claim payment receipt, automatically renew, automatically suspend, enforce network access, create charges, create invoices, create wallet or ledger entries, call M-PESA, create Celery expiry jobs, create RADIUS/PPPoE/RouterOS/provisioning behavior, or add customer-portal, installation-fee, equipment-billing, or notification workflows.
+
+Phase 6 wallets and ledger entries are account-level accounting records only. `billing.Wallet` belongs to a subscriber, not a service. It stores no mutable balance, payment reference, M-PESA transaction ID, invoice balance, package link, or service link. `billing.LedgerEntry` is append-only, stores integer KES minor units, and derives balance from the latest ledger sequence. Manual credits are not proof of payment. Manual debits are accounting corrections, not package charges or invoices. Corrections use reversal entries rather than editing or deletion. Balances may not become negative. Partial and overpayments may later remain as wallet credit, but payment integration is not implemented in Phase 6.
 
 ## Reuse-First Engineering
 

@@ -5,7 +5,7 @@ import uuid
 from django import forms
 from django.core.exceptions import ValidationError
 
-from .models import Plan
+from .models import MAX_MONEY_MINOR, LedgerEntry, Plan
 from .money import ksh_to_minor_units, minor_units_to_ksh
 
 
@@ -142,6 +142,62 @@ class BillingPeriodActionForm(forms.Form):
         except ValueError as exc:
             raise ValidationError("Expected previous billing period is not valid.") from exc
         return value
+
+    def clean_reason(self) -> str:
+        reason = self.cleaned_data["reason"].strip()
+        if not reason:
+            raise ValidationError("Reason is required.")
+        return reason
+
+
+class WalletAdjustmentForm(forms.Form):
+    operation_id = forms.UUIDField(widget=forms.HiddenInput)
+    direction = forms.ChoiceField(choices=LedgerEntry.DIRECTION_CHOICES, widget=forms.HiddenInput)
+    amount_ksh = forms.DecimalField(
+        label="Amount (KSh)",
+        max_digits=12,
+        decimal_places=2,
+        widget=forms.NumberInput(attrs={"class": "field", "step": "0.01", "min": "0.01"}),
+    )
+    reason = forms.CharField(
+        label="Reason",
+        required=True,
+        max_length=240,
+        widget=forms.Textarea(attrs={"class": "field", "rows": 2}),
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        initial = kwargs.setdefault("initial", {})
+        initial.setdefault("operation_id", uuid.uuid4())
+        super().__init__(*args, **kwargs)
+
+    def clean_amount_ksh(self):
+        amount = self.cleaned_data["amount_ksh"]
+        amount_minor = ksh_to_minor_units(amount)
+        if amount_minor > MAX_MONEY_MINOR:
+            raise ValidationError("Amount is too large.")
+        return amount
+
+    def clean_reason(self) -> str:
+        reason = self.cleaned_data["reason"].strip()
+        if not reason:
+            raise ValidationError("Reason is required.")
+        return reason
+
+
+class LedgerReversalForm(forms.Form):
+    operation_id = forms.UUIDField(widget=forms.HiddenInput)
+    reason = forms.CharField(
+        label="Reason",
+        required=True,
+        max_length=240,
+        widget=forms.Textarea(attrs={"class": "field", "rows": 2}),
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        initial = kwargs.setdefault("initial", {})
+        initial.setdefault("operation_id", uuid.uuid4())
+        super().__init__(*args, **kwargs)
 
     def clean_reason(self) -> str:
         reason = self.cleaned_data["reason"].strip()

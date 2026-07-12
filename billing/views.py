@@ -7,10 +7,17 @@ from django.core.paginator import Paginator
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 
-from subscribers.models import Service
+from subscribers.models import Service, Subscriber
 
-from .forms import BillingPeriodActionForm, PackageSearchForm, PlanForm, SubscriptionPackageForm
-from .models import BillingPeriod, Plan, Subscription
+from .forms import (
+    BillingPeriodActionForm,
+    LedgerReversalForm,
+    PackageSearchForm,
+    PlanForm,
+    SubscriptionPackageForm,
+    WalletAdjustmentForm,
+)
+from .models import BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
 from .services import (
     activate_billing_period,
     assign_package,
@@ -18,7 +25,9 @@ from .services import (
     change_subscription_package,
     create_package,
     end_subscription,
+    post_manual_wallet_adjustment,
     renew_billing_period,
+    reverse_ledger_entry,
     set_package_active,
     update_package,
 )
@@ -316,3 +325,115 @@ def billing_period_history(request, service_pk):
         "billing/billing_period_history.html",
         {"service": service, "page": page, "current_state": current_state},
     )
+
+
+@login_required
+@permission_required("subscribers.view_subscriber", raise_exception=True)
+@permission_required("billing.view_wallet", raise_exception=True)
+@permission_required("billing.view_ledgerentry", raise_exception=True)
+def wallet_detail(request, subscriber_pk):
+    subscriber = get_object_or_404(Subscriber, pk=subscriber_pk)
+    wallet = Wallet.objects.filter(subscriber=subscriber).first()
+    latest_entry = None
+    entries = LedgerEntry.objects.none()
+    balance_display = "KSh 0"
+    if wallet is not None:
+        entries = (
+            wallet.entries.select_related("created_by", "reverses_entry")
+            .order_by("-sequence_number")
+        )
+        latest_entry = entries.first()
+        balance_display = wallet.formatted_balance
+    paginator = Paginator(entries, 20)
+    page = paginator.get_page(request.GET.get("page"))
+    entry_rows = [
+        {"entry": entry, "reversal_form": LedgerReversalForm()}
+        for entry in page.object_list
+    ]
+    can_add_ledger_entry = request.user.has_perm("billing.add_ledgerentry")
+    credit_form = WalletAdjustmentForm(
+        initial={"direction": LedgerEntry.DIRECTION_CREDIT},
+    )
+    debit_form = WalletAdjustmentForm(
+        initial={"direction": LedgerEntry.DIRECTION_DEBIT},
+    )
+    return render(
+        request,
+        "billing/wallet_detail.html",
+        {
+            "subscriber": subscriber,
+            "wallet": wallet,
+            "balance_display": balance_display,
+            "latest_entry": latest_entry,
+            "page": page,
+            "entry_rows": entry_rows,
+            "can_add_ledger_entry": can_add_ledger_entry,
+            "credit_form": credit_form,
+            "debit_form": debit_form,
+        },
+    )
+
+
+@login_required
+@permission_required("subscribers.view_subscriber", raise_exception=True)
+@permission_required("billing.view_wallet", raise_exception=True)
+@permission_required("billing.view_ledgerentry", raise_exception=True)
+@permission_required("billing.add_ledgerentry", raise_exception=True)
+def wallet_adjustment(request, subscriber_pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    subscriber = get_object_or_404(Subscriber, pk=subscriber_pk)
+    form = WalletAdjustmentForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("wallet_detail", subscriber_pk=subscriber.pk)
+    try:
+        entry = post_manual_wallet_adjustment(
+            subscriber=subscriber,
+            direction=form.cleaned_data["direction"],
+            amount=form.cleaned_data["amount_ksh"],
+            operation_id=form.cleaned_data["operation_id"],
+            reason=form.cleaned_data["reason"],
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, f"Wallet {entry.get_direction_display().lower()} posted.")
+    return redirect("wallet_detail", subscriber_pk=subscriber.pk)
+
+
+@login_required
+@permission_required("subscribers.view_subscriber", raise_exception=True)
+@permission_required("billing.view_wallet", raise_exception=True)
+@permission_required("billing.view_ledgerentry", raise_exception=True)
+@permission_required("billing.add_ledgerentry", raise_exception=True)
+def ledger_entry_reverse(request, entry_pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    entry = get_object_or_404(
+        LedgerEntry.objects.select_related("wallet", "wallet__subscriber"),
+        pk=entry_pk,
+    )
+    form = LedgerReversalForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("wallet_detail", subscriber_pk=entry.wallet.subscriber_id)
+    try:
+        reverse_ledger_entry(
+            entry=entry,
+            operation_id=form.cleaned_data["operation_id"],
+            reason=form.cleaned_data["reason"],
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Ledger entry reversed.")
+    return redirect("wallet_detail", subscriber_pk=entry.wallet.subscriber_id)

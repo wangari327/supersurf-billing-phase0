@@ -2,7 +2,7 @@
 
 ## Supported Status
 
-This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, Phase 4 package assignments, and Phase 5 billing periods. It is not production-ready for payments, billing charges, RADIUS, or RouterOS operations.
+This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, and the Phase 6 wallet ledger foundation. It is not production-ready for payments, billing charges, RADIUS, or RouterOS operations.
 
 Security requirements in this document are binding for later phases unless explicitly superseded by a reviewed ADR.
 
@@ -25,6 +25,7 @@ Security requirements in this document are binding for later phases unless expli
 - Phase 3 subscriber and service registry with audited create, update, deactivate, and reactivate workflows
 - Phase 4 audited package assignment, package change, and subscription ending workflows with immutable package snapshots
 - Phase 5 audited manual billing-period activation and renewal workflows with immutable period snapshots
+- Phase 6 audited manual wallet credits, manual wallet debits, and reversal workflows with append-only ledger entries
 
 ## Package Catalog Security
 
@@ -61,6 +62,18 @@ Billing period creation must acquire row locks in service-first order: service a
 Billing period data on subscriber pages and history pages requires `subscribers.view_service`, `billing.view_subscription`, and `billing.view_billingperiod`. Creating a period requires `subscribers.view_service`, `billing.view_subscription`, and `billing.add_billingperiod`. Ordinary roles are not granted `billing.change_billingperiod` or `billing.delete_billingperiod`.
 
 Manual renewal records access-period intent only. They do not claim payment receipt, create charges, create invoices, update wallets or ledgers, call M-PESA, suspend services, or enforce network access.
+
+## Wallet And Ledger Security
+
+Wallet and ledger mutations must go through audited service-layer functions. Wallets are subscriber account-level records, not service records. Wallets store no mutable balance; current balance is derived from the latest append-only ledger sequence.
+
+Ledger entries store integer KES minor units only. Manual credits are not proof of payment. Manual debits are accounting corrections only and are not package charges, renewal charges, invoices, or receipts. Corrections use reversal entries rather than editing or deletion.
+
+Wallets and ledger entries are immutable in application code after creation. Model save, queryset update, bulk update, model delete, and queryset delete paths are rejected. Direct database access remains outside these application controls.
+
+Ledger mutations must lock in subscriber, wallet, latest ledger entry, and reversal-target order. PostgreSQL CI is the authoritative concurrency check for first-wallet creation, sequence allocation, duplicate operation handling, debit balance checks, and reversal races.
+
+Wallet data requires `subscribers.view_subscriber`, `billing.view_wallet`, and `billing.view_ledgerentry`. Posting manual adjustments or reversals additionally requires `billing.add_ledgerentry`. Ordinary roles are not granted `billing.add_wallet`, `billing.change_wallet`, `billing.delete_wallet`, `billing.change_ledgerentry`, or `billing.delete_ledgerentry`. NOC receives no wallet or ledger permissions in Phase 6.
 
 ## Audit Immutability Boundary
 

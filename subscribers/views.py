@@ -11,7 +11,8 @@ from django.db.models import Count, Q
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 
-from billing.models import BillingPeriod, Plan, Subscription
+from billing.models import BillingPeriod, Plan, Subscription, Wallet
+from billing.money import format_ksh
 from billing.services import billing_state_for_service
 
 from .forms import ServiceForm, SubscriberForm, SubscriberSearchForm
@@ -97,6 +98,9 @@ def subscriber_detail(request, pk):
     can_view_billing_periods = (
         can_view_subscriptions and request.user.has_perm("billing.view_billingperiod")
     )
+    can_view_wallet = request.user.has_perm("billing.view_wallet") and request.user.has_perm(
+        "billing.view_ledgerentry"
+    )
     can_add_service = request.user.has_perm("subscribers.add_service")
     can_change_service = request.user.has_perm("subscribers.change_service")
     can_assign_subscription = can_view_services and request.user.has_perm(
@@ -112,6 +116,14 @@ def subscriber_detail(request, pk):
     if can_view_services:
         subscribers = subscribers.prefetch_related("services")
     subscriber = get_object_or_404(subscribers, pk=pk)
+    wallet = None
+    wallet_latest_entry = None
+    wallet_balance_display = format_ksh(0)
+    if can_view_wallet:
+        wallet = Wallet.objects.filter(subscriber=subscriber).first()
+        if wallet is not None:
+            wallet_latest_entry = wallet.entries.order_by("-sequence_number").first()
+            wallet_balance_display = wallet.formatted_balance
     service_rows = []
     active_plans = []
     if can_view_services:
@@ -177,6 +189,10 @@ def subscriber_detail(request, pk):
             "can_change_subscription": can_change_subscription,
             "can_view_billing_periods": can_view_billing_periods,
             "can_add_billing_period": can_add_billing_period,
+            "can_view_wallet": can_view_wallet,
+            "wallet": wallet,
+            "wallet_latest_entry": wallet_latest_entry,
+            "wallet_balance_display": wallet_balance_display,
             "service_rows": service_rows,
             "service_count": len(service_rows),
             "active_plans": active_plans,

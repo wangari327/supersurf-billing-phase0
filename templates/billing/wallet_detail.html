@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Wallet - {{ subscriber.account_number }}{% endblock %}
+
+{% block content %}
+<section class="max-w-5xl">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Wallet</h1>
+      <p class="mt-1 text-sm text-slate-600">{{ subscriber.account_number }}</p>
+      <p class="mt-2 text-sm text-amber-900">Manual wallet adjustments are accounting entries and do not confirm receipt of payment.</p>
+    </div>
+    <div class="text-left">
+      <p class="text-sm text-slate-600">Current balance</p>
+      <p class="mt-1 text-xl font-semibold">{{ balance_display }}</p>
+    </div>
+  </div>
+
+  <div class="mt-6 flex flex-wrap gap-2">
+    <a class="btn" href="{% url 'subscriber_detail' subscriber.pk %}">Back to subscriber</a>
+  </div>
+
+  {% if can_add_ledger_entry %}
+    <section class="mt-6 grid gap-4 lg:grid-cols-2">
+      <form method="post" action="{% url 'wallet_adjustment' subscriber.pk %}" class="card p-4 space-y-3">
+        {% csrf_token %}
+        {{ credit_form.operation_id }}
+        {{ credit_form.direction }}
+        <h2 class="text-lg font-semibold">Add manual credit</h2>
+        <div>
+          <label class="label" for="credit_amount_ksh">Amount (KSh)</label>
+          <input id="credit_amount_ksh" class="field" name="amount_ksh" type="number" min="0.01" step="0.01" required>
+        </div>
+        <div>
+          <label class="label" for="credit_reason">Reason</label>
+          <textarea id="credit_reason" class="field" name="reason" rows="2" maxlength="240" required></textarea>
+        </div>
+        <button class="btn btn-primary" type="submit">Add manual credit</button>
+      </form>
+
+      <form method="post" action="{% url 'wallet_adjustment' subscriber.pk %}" class="card p-4 space-y-3">
+        {% csrf_token %}
+        {{ debit_form.operation_id }}
+        {{ debit_form.direction }}
+        <h2 class="text-lg font-semibold">Add manual debit</h2>
+        <p class="text-sm text-slate-600">Manual debits are accounting corrections, not package charges or invoices.</p>
+        <div>
+          <label class="label" for="debit_amount_ksh">Amount (KSh)</label>
+          <input id="debit_amount_ksh" class="field" name="amount_ksh" type="number" min="0.01" step="0.01" required>
+        </div>
+        <div>
+          <label class="label" for="debit_reason">Reason</label>
+          <textarea id="debit_reason" class="field" name="reason" rows="2" maxlength="240" required></textarea>
+        </div>
+        <button class="btn" type="submit">Add manual debit</button>
+      </form>
+    </section>
+  {% endif %}
+
+  <section class="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    {% if entry_rows %}
+      <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+          <tr>
+            <th class="px-4 py-3 text-left">Sequence</th>
+            <th class="px-4 py-3 text-left">Type</th>
+            <th class="px-4 py-3 text-left">Direction</th>
+            <th class="px-4 py-3 text-left">Amount</th>
+            <th class="px-4 py-3 text-left">Balance</th>
+            <th class="px-4 py-3 text-left">Reason</th>
+            <th class="px-4 py-3 text-left">Operator</th>
+            <th class="px-4 py-3 text-left">Created</th>
+            <th class="px-4 py-3 text-left">Reversal</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {% for row in entry_rows %}
+            {% with entry=row.entry %}
+              <tr>
+                <td class="px-4 py-3 font-medium">{{ entry.sequence_number }}</td>
+                <td class="px-4 py-3">{{ entry.get_entry_type_display }}</td>
+                <td class="px-4 py-3">{{ entry.get_direction_display }}</td>
+                <td class="px-4 py-3">{{ entry.formatted_amount }}</td>
+                <td class="px-4 py-3">{{ entry.formatted_balance_after }}</td>
+                <td class="px-4 py-3">{{ entry.reason }}</td>
+                <td class="px-4 py-3">{{ entry.created_by.username }}</td>
+                <td class="px-4 py-3">{{ entry.created_at|date:"Y-m-d H:i" }}</td>
+                <td class="px-4 py-3">
+                  {% if entry.entry_type == "reversal" %}
+                    <span class="text-slate-600">Reversal of #{{ entry.reverses_entry.sequence_number }}</span>
+                  {% elif entry.is_reversible %}
+                    {% if can_add_ledger_entry %}
+                      <form method="post" action="{% url 'ledger_entry_reverse' entry.pk %}" class="space-y-2">
+                        {% csrf_token %}
+                        {{ row.reversal_form.operation_id }}
+                        <label class="label" for="reverse_reason_{{ entry.pk }}">Reason</label>
+                        <textarea id="reverse_reason_{{ entry.pk }}" class="field" name="reason" rows="2" maxlength="240" required></textarea>
+                        <button class="btn" type="submit">Reverse</button>
+                      </form>
+                    {% else %}
+                      <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Eligible</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Reversed</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endwith %}
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="p-6 text-sm text-slate-600">No ledger entries exist.</p>
+    {% endif %}
+  </section>
+
+  {% if page.has_other_pages %}
+    <div class="mt-4 flex gap-2">
+      {% if page.has_previous %}
+        <a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>
+      {% endif %}
+      {% if page.has_next %}
+        <a class="btn" href="?page={{ page.next_page_number }}">Next</a>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

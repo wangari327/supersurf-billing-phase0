@@ -107,3 +107,9 @@ Reason: Operators need a safe way to record which package applies to a service b
 Decision: Phase 5 creates `billing.BillingPeriod` as append-only manual access-period history with snapshots copied from the active subscription. It supports manual activation and renewal, operation ID idempotency, stale-form checks, derived billing state, and PostgreSQL-tested sequence allocation. It does not create charges, invoices, wallets, ledgers, payment records, M-PESA records, automatic renewals, automatic suspension, RADIUS rows, PPPoE credentials, RouterOS calls, provisioning jobs, customer portals, notifications, installation fees, or equipment billing.
 
 Reason: Operators need a reviewed way to record access periods and apply approved renewal date rules before any money movement or network enforcement is connected to the platform. Keeping payment claims and network actions out of Phase 5 prevents manual renewal from being mistaken for received revenue or actual service suspension/reactivation.
+
+## D019: Add Wallet Ledger Foundation Before Payment Integration
+
+Decision: Phase 6 creates account-level `billing.Wallet` and append-only `billing.LedgerEntry` records for manual credits, manual debits, and reversals. Wallet balances are derived from the latest ledger entry rather than stored as mutable fields. Phase 6 does not create payments, M-PESA records, Paybill or Till callbacks, invoices, receipts, renewal charges, automatic wallet-funded renewal, automatic expiry, suspension, RADIUS rows, PPPoE credentials, RouterOS calls, provisioning jobs, notifications, or customer portals.
+
+Reason: SuperSurf needs a constrained accounting foundation before payment providers and renewal allocation can safely write value into the system. Keeping manual credits separate from payment proof prevents operators and reports from treating a manual adjustment as received money.

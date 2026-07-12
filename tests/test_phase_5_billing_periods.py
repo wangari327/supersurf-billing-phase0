@@ -901,8 +901,6 @@ def test_phase_5_scope_does_not_include_future_billing_or_network_models():
     model_names = {model.__name__.lower() for model in apps.get_models()}
     forbidden_models = {
         "payment",
-        "wallet",
-        "ledgerentry",
         "invoice",
         "receipt",
         "discount",

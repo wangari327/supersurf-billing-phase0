@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import uuid
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F, Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
 from .money import format_ksh
+
+MAX_MONEY_MINOR = 2_147_483_647
 
 
 class Plan(models.Model):
@@ -529,3 +532,389 @@ class BillingPeriod(models.Model):
         if changed:
             names = ", ".join(sorted(changed))
             raise RuntimeError(f"BillingPeriod fields cannot be changed after creation: {names}.")
+
+
+class WalletQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "Wallet records cannot be updated through application code."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "Wallet records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "Wallet records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+
+class WalletManager(models.Manager):
+    def get_queryset(self):
+        return WalletQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "Wallet records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class Wallet(models.Model):
+    IMMUTABLE_FIELDS = ("subscriber_id", "currency")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    subscriber = models.OneToOneField(
+        "subscribers.Subscriber",
+        on_delete=models.PROTECT,
+        related_name="wallet",
+    )
+    currency = models.CharField(max_length=3, default="KES", editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = WalletManager()
+
+    class Meta:
+        ordering = ["subscriber__account_number"]
+        indexes = [models.Index(fields=["subscriber"], name="billing_wallet_subscriber_idx")]
+        constraints = [
+            models.CheckConstraint(condition=Q(currency="KES"), name="billing_wallet_currency_kes")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.subscriber.account_number} wallet"
+
+    def save(self, *args, **kwargs) -> None:
+        self._reject_protected_changes()
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        if self.currency != "KES":
+            raise ValidationError({"currency": "Wallet currency must be KES."})
+
+    def delete(self, *args, **kwargs) -> None:
+        msg = "Wallet records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    @property
+    def balance_minor(self) -> int:
+        latest_entry = self.entries.order_by("-sequence_number").first()
+        if latest_entry is None:
+            return 0
+        return latest_entry.balance_after_minor
+
+    @property
+    def formatted_balance(self) -> str:
+        return format_ksh(self.balance_minor)
+
+    def _reject_protected_changes(self) -> None:
+        if not self.pk:
+            return
+        try:
+            current = type(self).objects.get(pk=self.pk)
+        except type(self).DoesNotExist:
+            return
+        changed = [
+            field
+            for field in self.IMMUTABLE_FIELDS
+            if getattr(current, field) != getattr(self, field)
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(f"Wallet fields cannot be changed after creation: {names}.")
+
+
+class LedgerEntryQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "LedgerEntry records cannot be updated through application code."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "LedgerEntry records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "LedgerEntry records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+
+class LedgerEntryManager(models.Manager):
+    def get_queryset(self):
+        return LedgerEntryQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "LedgerEntry records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class LedgerEntry(models.Model):
+    ENTRY_MANUAL_CREDIT = "manual_credit"
+    ENTRY_MANUAL_DEBIT = "manual_debit"
+    ENTRY_REVERSAL = "reversal"
+    ENTRY_TYPE_CHOICES = [
+        (ENTRY_MANUAL_CREDIT, "Manual credit"),
+        (ENTRY_MANUAL_DEBIT, "Manual debit"),
+        (ENTRY_REVERSAL, "Reversal"),
+    ]
+    DIRECTION_CREDIT = "credit"
+    DIRECTION_DEBIT = "debit"
+    DIRECTION_CHOICES = [
+        (DIRECTION_CREDIT, "Credit"),
+        (DIRECTION_DEBIT, "Debit"),
+    ]
+    IMMUTABLE_FIELDS = (
+        "wallet_id",
+        "sequence_number",
+        "operation_id",
+        "entry_type",
+        "direction",
+        "amount_minor",
+        "balance_after_minor",
+        "currency",
+        "previous_entry_id",
+        "reverses_entry_id",
+        "reason",
+        "created_by_id",
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    wallet = models.ForeignKey(Wallet, on_delete=models.PROTECT, related_name="entries")
+    sequence_number = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    operation_id = models.UUIDField(unique=True, editable=False)
+    entry_type = models.CharField(max_length=20, choices=ENTRY_TYPE_CHOICES)
+    direction = models.CharField(max_length=6, choices=DIRECTION_CHOICES)
+    amount_minor = models.PositiveIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_MONEY_MINOR)]
+    )
+    balance_after_minor = models.PositiveIntegerField(
+        validators=[MinValueValidator(0), MaxValueValidator(MAX_MONEY_MINOR)]
+    )
+    currency = models.CharField(max_length=3, default="KES", editable=False)
+    previous_entry = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="next_entries",
+    )
+    reverses_entry = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="reversal_entry",
+    )
+    reason = models.CharField(max_length=240)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_ledger_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = LedgerEntryManager()
+
+    class Meta:
+        verbose_name = "Ledger entry"
+        verbose_name_plural = "Ledger entries"
+        ordering = ["wallet", "-sequence_number"]
+        indexes = [
+            models.Index(fields=["wallet", "sequence_number"], name="ledger_entry_wallet_seq_idx"),
+            models.Index(fields=["wallet", "created_at"], name="ledger_wallet_created_idx"),
+            models.Index(fields=["operation_id"], name="ledger_entry_operation_idx"),
+            models.Index(fields=["entry_type"], name="ledger_entry_type_idx"),
+            models.Index(fields=["reverses_entry"], name="ledger_entry_reverses_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["wallet", "sequence_number"],
+                name="ledger_entry_wallet_sequence_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["previous_entry"],
+                condition=Q(previous_entry__isnull=False),
+                name="ledger_entry_previous_single_successor",
+            ),
+            models.CheckConstraint(
+                condition=Q(sequence_number__gt=0),
+                name="ledger_entry_sequence_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(amount_minor__gt=0),
+                name="ledger_entry_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(balance_after_minor__gte=0),
+                name="ledger_entry_balance_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=Q(currency="KES"),
+                name="ledger_entry_currency_kes",
+            ),
+            models.CheckConstraint(
+                condition=Q(entry_type__in=["manual_credit", "manual_debit", "reversal"]),
+                name="ledger_entry_type_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(direction__in=["credit", "debit"]),
+                name="ledger_entry_direction_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(sequence_number=1, previous_entry__isnull=True)
+                    | Q(sequence_number__gt=1, previous_entry__isnull=False)
+                ),
+                name="ledger_entry_previous_matches_sequence",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        entry_type__in=["manual_credit", "manual_debit"],
+                        reverses_entry__isnull=True,
+                    )
+                    | Q(entry_type="reversal", reverses_entry__isnull=False)
+                ),
+                name="ledger_entry_reversal_matches_type",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.wallet} ledger entry {self.sequence_number}"
+
+    def save(self, *args, **kwargs) -> None:
+        self._reject_protected_changes()
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        self.reason = self.reason.strip()
+        if not self.reason:
+            raise ValidationError({"reason": "Reason is required."})
+        if self.entry_type not in {
+            self.ENTRY_MANUAL_CREDIT,
+            self.ENTRY_MANUAL_DEBIT,
+            self.ENTRY_REVERSAL,
+        }:
+            raise ValidationError({"entry_type": "Ledger entry type is not valid."})
+        if self.direction not in {self.DIRECTION_CREDIT, self.DIRECTION_DEBIT}:
+            raise ValidationError({"direction": "Ledger direction is not valid."})
+        if self.currency != "KES":
+            raise ValidationError({"currency": "Ledger currency must be KES."})
+        if self.sequence_number is not None:
+            if self.sequence_number <= 0:
+                raise ValidationError({"sequence_number": "Sequence number must be positive."})
+            if self.sequence_number == 1 and self.previous_entry_id:
+                raise ValidationError(
+                    {"previous_entry": "First ledger entry cannot have a previous entry."}
+                )
+            if self.sequence_number > 1 and not self.previous_entry_id:
+                raise ValidationError({"previous_entry": "Ledger entry requires a previous entry."})
+        if self.amount_minor is not None and self.amount_minor <= 0:
+            raise ValidationError({"amount_minor": "Amount must be greater than zero."})
+        if self.amount_minor is not None and self.amount_minor > MAX_MONEY_MINOR:
+            raise ValidationError({"amount_minor": "Amount is too large."})
+        if self.balance_after_minor is not None and self.balance_after_minor < 0:
+            raise ValidationError({"balance_after_minor": "Balance cannot be negative."})
+        if self.balance_after_minor is not None and self.balance_after_minor > MAX_MONEY_MINOR:
+            raise ValidationError({"balance_after_minor": "Balance is too large."})
+
+        previous_balance = 0
+        if self.previous_entry_id:
+            if self.wallet_id and self.previous_entry.wallet_id != self.wallet_id:
+                raise ValidationError(
+                    {"previous_entry": "Previous entry must belong to this wallet."}
+                )
+            if (
+                self.sequence_number is not None
+                and self.previous_entry.sequence_number != self.sequence_number - 1
+            ):
+                raise ValidationError(
+                    {"previous_entry": "Previous entry sequence must be exactly one less."}
+                )
+            previous_balance = self.previous_entry.balance_after_minor
+        elif self.sequence_number and self.sequence_number > 1:
+            raise ValidationError({"previous_entry": "Ledger entry requires a previous entry."})
+
+        if self.entry_type in {self.ENTRY_MANUAL_CREDIT, self.ENTRY_MANUAL_DEBIT}:
+            if self.reverses_entry_id:
+                raise ValidationError(
+                    {"reverses_entry": "Manual entries cannot reverse another entry."}
+                )
+        elif self.entry_type == self.ENTRY_REVERSAL:
+            self._clean_reversal_target()
+
+        expected_balance = (
+            previous_balance + self.amount_minor
+            if self.direction == self.DIRECTION_CREDIT
+            else previous_balance - self.amount_minor
+        )
+        if expected_balance < 0:
+            raise ValidationError({"balance_after_minor": "Wallet balance cannot become negative."})
+        if self.balance_after_minor is not None and self.balance_after_minor != expected_balance:
+            raise ValidationError({"balance_after_minor": "Balance after entry is not correct."})
+
+    def delete(self, *args, **kwargs) -> None:
+        msg = "LedgerEntry records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    @property
+    def formatted_amount(self) -> str:
+        return format_ksh(self.amount_minor)
+
+    @property
+    def formatted_balance_after(self) -> str:
+        return format_ksh(self.balance_after_minor)
+
+    @property
+    def is_reversible(self) -> bool:
+        if self.entry_type not in {self.ENTRY_MANUAL_CREDIT, self.ENTRY_MANUAL_DEBIT}:
+            return False
+        return not LedgerEntry.objects.filter(reverses_entry=self).exists()
+
+    def _clean_reversal_target(self) -> None:
+        if not self.reverses_entry_id:
+            raise ValidationError({"reverses_entry": "Reversal requires a target entry."})
+        target = self.reverses_entry
+        if self.wallet_id and target.wallet_id != self.wallet_id:
+            raise ValidationError({"reverses_entry": "Reversal target must belong to this wallet."})
+        if target.entry_type == self.ENTRY_REVERSAL:
+            raise ValidationError({"reverses_entry": "A reversal cannot reverse another reversal."})
+        if target.entry_type not in {self.ENTRY_MANUAL_CREDIT, self.ENTRY_MANUAL_DEBIT}:
+            raise ValidationError({"reverses_entry": "Only manual entries can be reversed."})
+        if (
+            LedgerEntry.objects.filter(reverses_entry=target)
+            .exclude(pk=self.pk)
+            .exists()
+        ):
+            raise ValidationError(
+                {"reverses_entry": "This ledger entry has already been reversed."}
+            )
+        if self.amount_minor != target.amount_minor:
+            raise ValidationError(
+                {"amount_minor": "Reversal amount must match the original entry."}
+            )
+        expected_direction = (
+            self.DIRECTION_DEBIT
+            if target.direction == self.DIRECTION_CREDIT
+            else self.DIRECTION_CREDIT
+        )
+        if self.direction != expected_direction:
+            raise ValidationError(
+                {"direction": "Reversal direction must oppose the original entry."}
+            )
+
+    def _reject_protected_changes(self) -> None:
+        if not self.pk:
+            return
+        try:
+            current = type(self).objects.get(pk=self.pk)
+        except type(self).DoesNotExist:
+            return
+        changed = [
+            field
+            for field in self.IMMUTABLE_FIELDS
+            if getattr(current, field) != getattr(self, field)
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(f"LedgerEntry fields cannot be changed after creation: {names}.")

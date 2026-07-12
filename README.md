@@ -2,9 +2,9 @@
 
 SuperSurf Billing is a planned Kenya-first ISP billing and subscriber-management platform for SuperSurf.
 
-This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, the Phase 3 subscriber registry, Phase 4 package assignments, and Phase 5 billing periods.
+This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, the Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, and the Phase 6 wallet ledger foundation.
 
-Phase 5 deliberately adds only manual access-period records and manual renewals against the active subscription snapshot. It does not include billing charges, invoices, discounts, payments, wallets, ledger transactions, M-PESA implementation, automatic renewals, automatic expiry, automatic suspension, FreeRADIUS provisioning, PPPoE credentials, RouterOS integration, network provisioning, installation fees, equipment billing, customer portals, notifications, or live network actions.
+Phase 6 deliberately adds only account-level wallet accounting and controlled manual ledger adjustments. Manual wallet credits are not proof of payment. It does not include billing charges, invoices, receipts, discounts, payments, M-PESA implementation, Paybill, Till, automatic wallet-funded renewal, automatic renewals, automatic expiry, automatic suspension, FreeRADIUS provisioning, PPPoE credentials, RouterOS integration, network provisioning, customer portals, notifications, or live network actions.
 
 ## Current Deliverables
 
@@ -38,11 +38,12 @@ Phase 5 deliberately adds only manual access-period records and manual renewals 
 - Phase 3 subscriber registry with generated subscriber account numbers, generated service references, Kenya phone normalization, audited profile/status workflows, and view-only access for non-admin operator roles
 - Phase 4 manual package assignment with immutable package snapshots and subscription history
 - Phase 5 manual billing periods, manual renewal date rules, derived billing state, duplicate-operation protection, and paginated period history
+- Phase 6 account-level wallets, append-only ledger entries, manual credits/debits, reversals, and duplicate-operation protection
 - GitHub Actions CI
 
 ## Phase Boundary
 
-Phase 5 is complete only for manual billing periods and manual renewals. Manual renewal records do not claim payment receipt. Do not begin the next phase without explicit owner approval.
+Phase 6 is complete only for account-level wallet accounting and controlled manual ledger adjustments. Manual credits do not claim payment receipt, and manual debits are not package charges or invoices. Do not begin the next phase without explicit owner approval.
 
 Still absent:
 
@@ -51,8 +52,8 @@ Still absent:
 - Billing charges
 - Subscriber billing
 - Invoices
-- Wallets
-- Ledger transactions
+- Receipts
+- Payment allocation
 - FreeRADIUS provisioning
 - PPPoE
 - RouterOS integration
@@ -103,6 +104,7 @@ Start with:
 11. `docs/implementation/phase-3-subscriber-registry.md`
 12. `docs/implementation/phase-4-package-assignments.md`
 13. `docs/implementation/phase-5-billing-periods.md`
+14. `docs/implementation/phase-6-wallet-ledger.md`
 
 ## Production Readiness
 

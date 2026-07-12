@@ -2,7 +2,7 @@
 
 ## Supported Status
 
-This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, the Phase 6 wallet ledger foundation, and Phase 7 Wallet-funded activation and renewal charges. It is not production-ready for payments, RADIUS, or RouterOS operations.
+This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, the Phase 6 wallet ledger foundation, Phase 7 Wallet-funded activation and renewal charges, and the Phase 8 canonical payment foundation. It is not production-ready for real provider payment integrations, RADIUS, or RouterOS operations.
 
 Security requirements in this document are binding for later phases unless explicitly superseded by a reviewed ADR.
 
@@ -27,6 +27,7 @@ Security requirements in this document are binding for later phases unless expli
 - Phase 5 audited manual billing-period activation and renewal workflows with immutable period snapshots
 - Phase 6 audited manual wallet credits, manual wallet debits, and reversal workflows with append-only ledger entries
 - Phase 7 audited Wallet-funded activation and renewal charge workflows with immutable billing charges
+- Phase 8 fake-provider payment ingestion, immutable canonical payments, Wallet payment credits, and unmatched-payment resolution
 
 ## Package Catalog Security
 
@@ -74,7 +75,7 @@ Wallets and ledger entries are immutable in application code after creation, inc
 
 Ledger mutations must lock in subscriber, wallet, latest ledger entry, and reversal-target order. PostgreSQL CI is the authoritative concurrency check for first-wallet creation, sequence allocation, duplicate operation handling, debit balance checks, and reversal races.
 
-Wallet data requires `subscribers.view_subscriber`, `billing.view_wallet`, and `billing.view_ledgerentry`. Posting manual adjustments or reversals additionally requires `billing.add_ledgerentry`. Ordinary roles are not granted `billing.add_wallet`, `billing.change_wallet`, `billing.delete_wallet`, `billing.change_ledgerentry`, or `billing.delete_ledgerentry`. NOC receives no wallet, ledger, or billing-charge permissions in Phase 7.
+Wallet data requires `subscribers.view_subscriber`, `billing.view_wallet`, and `billing.view_ledgerentry`. Posting manual adjustments or reversals additionally requires `billing.add_ledgerentry`. Ordinary roles are not granted `billing.add_wallet`, `billing.change_wallet`, `billing.delete_wallet`, `billing.change_ledgerentry`, or `billing.delete_ledgerentry`. NOC receives no wallet, ledger, billing-charge, payment, allocation, or unmatched-payment permissions in Phase 8.
 
 ## Wallet-Funded Billing Charge Security
 
@@ -89,6 +90,24 @@ Wallet-funded billing charge creation must lock in service and subscriber, Walle
 Wallet-funded charge data requires `billing.view_billingcharge` in addition to service, subscription, billing-period, Wallet, and ledger visibility. Posting Wallet-funded activation or renewal additionally requires `billing.add_billingcharge`, `billing.add_billingperiod`, and `billing.add_ledgerentry`. Administrator and Finance can post Wallet-funded charges; SuperSurf Support and Read Only can view charge status where they also have the supporting view permissions. Ordinary roles are not granted `billing.change_billingcharge` or `billing.delete_billingcharge`.
 
 Wallet-funded charges are not payment records, receipts, invoices, discounts, automatic renewals, customer-specific prices, M-PESA transactions, Paybill transactions, Till transactions, or network enforcement actions.
+
+## Payment Foundation Security
+
+Phase 8 payment ingestion is fake-provider only. Active fake provider profiles in `test` or `sandbox` environments may ingest through the development workflow; fake ingestion is blocked when `SUPERSURF_ENVIRONMENT=PRODUCTION`. Structural M-PESA provider profiles may exist for future modelling, but they cannot ingest payments in this phase.
+
+Payment records store provider-neutral identifiers, integer KES minor-unit amounts, aware received timestamps, optional account references, and optional SHA-256 payload digests. They do not store raw callback payloads, full payer phone numbers, access tokens, credentials, card data, bank credentials, mutable payment status, service package links, billing-period links, invoices, or receipts.
+
+`Payment` and `PaymentAllocation` records are immutable and append-only in application code after creation, including their creation timestamps. Model save, queryset update, bulk update, model delete, and queryset delete paths are rejected. Direct database access remains outside these application controls.
+
+Payment allocation is full-wallet credit only in Phase 8. Matched account references credit the subscriber account-level Wallet with a `payment_credit` ledger entry. Partial and overpayments remain Wallet credit. Payment ingestion does not create billing periods, billing charges, invoices, receipts, renewals, network access, suspension, RADIUS records, PPPoE credentials, RouterOS calls, or provisioning jobs.
+
+Unmatched payments remain valid canonical `Payment` records. Missing, malformed, service-reference, and unknown account-reference inputs create an open `UnmatchedPaymentCase` without creating a Wallet, ledger entry, or allocation. Resolution requires an explicit Administrator or Finance service workflow, a selected subscriber, a reason, and an atomic Wallet credit.
+
+Provider retries are idempotent only when provider profile, provider transaction ID, amount, currency, received timestamp, normalized account reference, and payload digest match. Conflicting retries are rejected. Operation IDs must not collide with existing ledger entries, payment allocations, billing periods, or billing charges.
+
+Payment audit metadata must not store operation IDs, raw request payloads, full phone numbers, email addresses, subscriber display names, credentials, tokens, callback secrets, CSRF tokens, card credentials, or bank credentials.
+
+Administrator and Finance can ingest fake payments and resolve unmatched cases. SuperSurf Support and Read Only can view payment, allocation, and unmatched-case records. NOC receives no payment permissions. No ordinary role receives payment, allocation, or unmatched-case delete permissions, and ordinary roles do not receive change permissions for `Payment` or `PaymentAllocation`.
 
 ## Audit Immutability Boundary
 
@@ -142,11 +161,11 @@ Sensitive values must not appear in logs, URLs, screenshots, support notes, ordi
 
 ## Payment Security
 
-M-PESA callbacks must be persisted before business processing. Duplicate callbacks must not double-credit. Invalid callbacks must credit nothing. Reversals must create compensating ledger entries rather than deleting history.
+Future M-PESA callbacks must be persisted before business processing. Duplicate callbacks must not double-credit. Invalid callbacks must credit nothing. Reversals must create compensating ledger entries rather than deleting history.
 
-Till payments must not be matched by amount alone.
+Future Till payments must not be matched by amount alone.
 
-M-PESA implementation has not begun. It is blocked until sandbox evidence is collected in `docs/research/mpesa-sandbox-evidence-checklist.md`.
+Real M-PESA implementation has not begun. It is blocked until sandbox evidence is collected in `docs/research/mpesa-sandbox-evidence-checklist.md`. Phase 8 provides only the fake-provider intake path and canonical payment records that a later thin M-PESA adapter may call.
 
 ## Network Safety
 

@@ -835,13 +835,14 @@ def test_no_wallet_or_ledger_edit_delete_routes():
         reverse("ledger_entry_delete", args=["00000000-0000-0000-0000-000000000000"])
 
 
-def test_phase_6_scope_does_not_include_future_payment_or_network_models():
+def test_phase_6_scope_does_not_include_future_invoice_provider_or_network_models():
     model_names = {model.__name__.lower() for model in apps.get_models()}
     forbidden_models = {
-        "payment",
         "invoice",
         "receipt",
         "discount",
+        "webhookevent",
+        "mpesapayment",
         "renewalcharge",
         "radius",
         "pppoe",

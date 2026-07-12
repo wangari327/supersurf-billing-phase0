@@ -5,7 +5,9 @@ import uuid
 from django import forms
 from django.core.exceptions import ValidationError
 
-from .models import MAX_MONEY_MINOR, LedgerEntry, Plan
+from subscribers.models import Subscriber
+
+from .models import MAX_MONEY_MINOR, LedgerEntry, PaymentProviderProfile, Plan
 from .money import ksh_to_minor_units, minor_units_to_ksh
 
 
@@ -199,6 +201,151 @@ class LedgerReversalForm(forms.Form):
         initial = kwargs.setdefault("initial", {})
         initial.setdefault("operation_id", uuid.uuid4())
         super().__init__(*args, **kwargs)
+
+    def clean_reason(self) -> str:
+        reason = self.cleaned_data["reason"].strip()
+        if not reason:
+            raise ValidationError("Reason is required.")
+        return reason
+
+
+class PaymentSearchForm(forms.Form):
+    STATUS_CHOICES = [
+        ("", "All"),
+        ("allocated", "Allocated"),
+        ("unmatched", "Unmatched"),
+    ]
+
+    q = forms.CharField(
+        required=False,
+        label="Search",
+        widget=forms.TextInput(
+            attrs={
+                "class": "field",
+                "placeholder": "Transaction ID, account reference, or subscriber account",
+            }
+        ),
+    )
+    status = forms.ChoiceField(
+        required=False,
+        choices=STATUS_CHOICES,
+        widget=forms.Select(attrs={"class": "field"}),
+    )
+    provider_profile = forms.ModelChoiceField(
+        required=False,
+        label="Provider profile",
+        queryset=PaymentProviderProfile.objects.none(),
+        widget=forms.Select(attrs={"class": "field"}),
+    )
+    date_from = forms.DateField(
+        required=False,
+        label="From",
+        widget=forms.DateInput(attrs={"class": "field", "type": "date"}),
+    )
+    date_to = forms.DateField(
+        required=False,
+        label="To",
+        widget=forms.DateInput(attrs={"class": "field", "type": "date"}),
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["provider_profile"].queryset = PaymentProviderProfile.objects.order_by(
+            "provider",
+            "product_type",
+            "environment",
+            "name",
+        )
+
+
+class FakePaymentIngestionForm(forms.Form):
+    operation_id = forms.UUIDField(widget=forms.HiddenInput)
+    provider_profile = forms.ModelChoiceField(
+        label="Provider profile",
+        queryset=PaymentProviderProfile.objects.none(),
+        widget=forms.Select(attrs={"class": "field"}),
+    )
+    provider_transaction_id = forms.CharField(
+        label="Provider transaction ID",
+        max_length=128,
+        widget=forms.TextInput(attrs={"class": "field"}),
+    )
+    amount_ksh = forms.DecimalField(
+        label="Amount (KSh)",
+        max_digits=12,
+        decimal_places=2,
+        widget=forms.NumberInput(attrs={"class": "field", "step": "0.01", "min": "0.01"}),
+    )
+    received_at = forms.DateTimeField(
+        label="Received at",
+        widget=forms.DateTimeInput(attrs={"class": "field", "type": "datetime-local"}),
+    )
+    account_reference = forms.CharField(
+        label="Account reference",
+        required=False,
+        max_length=64,
+        widget=forms.TextInput(attrs={"class": "field", "placeholder": "SS000001"}),
+    )
+    payload_digest = forms.CharField(
+        label="Payload digest",
+        required=False,
+        max_length=64,
+        widget=forms.TextInput(attrs={"class": "field"}),
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        initial = kwargs.setdefault("initial", {})
+        initial.setdefault("operation_id", uuid.uuid4())
+        super().__init__(*args, **kwargs)
+        self.fields["provider_profile"].queryset = PaymentProviderProfile.objects.filter(
+            is_active=True,
+            provider=PaymentProviderProfile.PROVIDER_FAKE,
+            product_type=PaymentProviderProfile.PRODUCT_FAKE,
+            environment__in=[
+                PaymentProviderProfile.ENVIRONMENT_TEST,
+                PaymentProviderProfile.ENVIRONMENT_SANDBOX,
+            ],
+        ).order_by("environment", "name")
+
+    def clean_provider_transaction_id(self) -> str:
+        value = self.cleaned_data["provider_transaction_id"].strip()
+        if not value:
+            raise ValidationError("Provider transaction ID is required.")
+        return value
+
+    def clean_amount_ksh(self):
+        amount = self.cleaned_data["amount_ksh"]
+        amount_minor = ksh_to_minor_units(amount)
+        if amount_minor > MAX_MONEY_MINOR:
+            raise ValidationError("Amount is too large.")
+        return amount
+
+    def clean_account_reference(self) -> str:
+        return self.cleaned_data["account_reference"].strip()
+
+    def clean_payload_digest(self) -> str:
+        return self.cleaned_data["payload_digest"].strip().lower()
+
+
+class ResolveUnmatchedPaymentForm(forms.Form):
+    operation_id = forms.UUIDField(widget=forms.HiddenInput)
+    subscriber = forms.ModelChoiceField(
+        label="Subscriber",
+        queryset=Subscriber.objects.none(),
+        widget=forms.Select(attrs={"class": "field"}),
+    )
+    reason = forms.CharField(
+        label="Resolution reason",
+        required=True,
+        max_length=240,
+        widget=forms.Textarea(attrs={"class": "field", "rows": 3}),
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        initial = kwargs.setdefault("initial", {})
+        initial.setdefault("operation_id", uuid.uuid4())
+        super().__init__(*args, **kwargs)
+        self.fields["subscriber"].queryset = Subscriber.objects.order_by("account_number")
 
     def clean_reason(self) -> str:
         reason = self.cleaned_data["reason"].strip()

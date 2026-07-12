@@ -863,14 +863,15 @@ def test_no_billing_charge_edit_delete_routes():
         reverse("billing_charge_delete", args=["00000000-0000-0000-0000-000000000000"])
 
 
-def test_phase_7_scope_excludes_payments_discounts_automation_and_network_models():
+def test_phase_7_scope_excludes_provider_discounts_automation_and_network_models():
     model_names = {model.__name__.lower() for model in apps.get_models()}
     forbidden_models = {
-        "payment",
         "invoice",
         "receipt",
         "discount",
         "bundle",
+        "webhookevent",
+        "mpesapayment",
         "radius",
         "pppoe",
         "routeros",

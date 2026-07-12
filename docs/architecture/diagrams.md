@@ -10,7 +10,7 @@ flowchart LR
     Broker --> Worker["Celery workers"]
     Worker --> DB
     Scheduler["Celery Beat or reviewed scheduler"] --> Broker
-    Mpesa["Safaricom Daraja callbacks"] --> Caddy["Caddy TLS reverse proxy"]
+    Mpesa["Future Safaricom Daraja callbacks"] --> Caddy["Caddy TLS reverse proxy"]
     Caddy --> Web
     Radius["FreeRADIUS"] --> DB
     Worker --> RadiusClient["RADIUS CoA client"]
@@ -41,26 +41,29 @@ flowchart TB
     Backup["Backup process"] --> Offsite["Encrypted off-site copy"]
 ```
 
-## Payment Data Flow
+## Phase 8 Fake Payment Data Flow
 
 ```mermaid
 sequenceDiagram
-    participant Daraja as Safaricom Daraja
-    participant Web as SuperSurf webhook
+    participant Staff as Administrator or Finance
+    participant Web as Django payment UI
     participant DB as PostgreSQL
-    participant Worker as Celery worker
-    participant Ledger as Ledger service
-    participant Network as Provisioning queue
+    participant Billing as Billing service
 
-    Daraja->>Web: C2B callback
-    Web->>DB: Persist raw event and idempotency key
-    Web->>Worker: Enqueue processing job
-    Worker->>DB: Lock payment event
-    Worker->>Ledger: Allocate to wallet/subscription
-    Ledger->>DB: Append ledger entries
-    Worker->>Network: Enqueue provisioning if service state changed
-    Network->>DB: Record job state and audit
+    Staff->>Web: Submit fake payment
+    Web->>Billing: ingest_fake_payment
+    Billing->>DB: Lock provider profile and canonical payment
+    Billing->>DB: Match SS account reference
+    alt matched account reference
+        Billing->>DB: Lock subscriber, wallet, and latest ledger entry
+        Billing->>DB: Create PaymentAllocation and payment_credit LedgerEntry
+    else missing, malformed, or unknown reference
+        Billing->>DB: Create UnmatchedPaymentCase
+    end
+    Billing->>DB: Record audit events
 ```
+
+Future M-PESA, Paybill, or Till adapters should call the same canonical payment service only after Daraja sandbox evidence and provider-specific controls are reviewed.
 
 ## Network Action Flow
 
@@ -81,4 +84,3 @@ sequenceDiagram
     Worker->>Router: Apply RouterOS action where allowed
     Worker->>DB: Store result, retries, and audit event
 ```
-

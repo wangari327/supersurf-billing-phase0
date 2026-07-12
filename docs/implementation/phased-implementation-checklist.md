@@ -120,11 +120,29 @@
 - [x] Tests.
 - [x] Stop for approval.
 
+## Phase 8: Canonical Payments And Wallet Credits
+
+- [x] Provider-neutral payment provider profile model.
+- [x] Immutable canonical payment model.
+- [x] Immutable full-wallet payment allocation model.
+- [x] Unmatched payment case model and resolution workflow.
+- [x] `payment_credit` ledger entry type.
+- [x] Fake provider ingestion for development and tests.
+- [x] Production block for fake payment ingestion.
+- [x] Exact `SS000001` account-reference matching.
+- [x] Matched payment Wallet credits.
+- [x] Missing, malformed, service-reference, and unknown-reference unmatched cases.
+- [x] Provider transaction idempotency and operation ID conflict checks.
+- [x] Payment and unmatched-case permissions.
+- [x] Operator UI for payment list, fake intake, detail, unmatched list, and resolution.
+- [x] PostgreSQL concurrency tests.
+- [x] Tests.
+- [x] Stop for approval.
+
 ## Future Phase: Billing And Payments
 
 - [ ] Invoices.
 - [ ] Receipts.
-- [ ] Payment recording.
 - [ ] Renewal engine.
 - [ ] Expiry and suspension automation.
 - [ ] Reports.
@@ -139,10 +157,8 @@
 - [ ] Till adapter.
 - [ ] Callback persistence.
 - [ ] Idempotency.
-- [ ] Matching.
-- [ ] Unmatched-payment workflow.
+- [ ] Provider-specific matching into the canonical payment service.
 - [ ] Reconciliation.
-- [ ] Fake callback tool.
 - [ ] Tests.
 - [ ] Stop for approval.
 

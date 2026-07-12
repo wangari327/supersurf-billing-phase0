@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import timedelta
 from uuid import UUID
 
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
@@ -17,8 +19,12 @@ from .models import (
     BillingCharge,
     BillingPeriod,
     LedgerEntry,
+    Payment,
+    PaymentAllocation,
+    PaymentProviderProfile,
     Plan,
     Subscription,
+    UnmatchedPaymentCase,
     Wallet,
 )
 from .money import ksh_to_minor_units
@@ -49,6 +55,8 @@ STALE_BILLING_PERIOD_MESSAGE = (
     "The billing period changed while this form was open. Refresh and try again."
 )
 STALE_LEDGER_MESSAGE = "The wallet ledger changed while this form was open. Refresh and try again."
+STALE_PAYMENT_MESSAGE = "The payment changed while this form was open. Refresh and try again."
+ACCOUNT_REFERENCE_RE = re.compile(r"^SS\d{6}$")
 
 
 def snapshot(plan: Plan) -> dict[str, object]:
@@ -154,6 +162,53 @@ def _billing_charge_metadata(charge: BillingCharge) -> dict[str, object]:
         "ledger_sequence_number": ledger_entry.sequence_number,
         "period_sequence_number": period.sequence_number,
     }
+
+
+def _payment_metadata(payment: Payment) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "payment_id": str(payment.pk),
+        "provider_profile_id": str(payment.provider_profile_id),
+        "provider_name": payment.provider_profile.name,
+        "provider": payment.provider_profile.provider,
+        "product_type": payment.provider_profile.product_type,
+        "provider_transaction_id": payment.provider_transaction_id,
+        "amount_minor": payment.amount_minor,
+        "currency": payment.currency,
+        "received_at": payment.received_at.isoformat(),
+    }
+    if ACCOUNT_REFERENCE_RE.fullmatch(payment.account_reference):
+        metadata["account_reference"] = payment.account_reference
+    return metadata
+
+
+def _payment_allocation_metadata(allocation: PaymentAllocation) -> dict[str, object]:
+    entry = allocation.ledger_entry
+    return {
+        **_payment_metadata(allocation.payment),
+        "subscriber_account_number": allocation.wallet.subscriber.account_number,
+        "wallet_id": str(allocation.wallet_id),
+        "allocation_id": str(allocation.pk),
+        "ledger_entry_id": str(allocation.ledger_entry_id),
+        "amount_minor": allocation.amount_minor,
+        "balance_after_minor": entry.balance_after_minor,
+        "currency": allocation.currency,
+        "ledger_sequence_number": entry.sequence_number,
+    }
+
+
+def _unmatched_case_metadata(case: UnmatchedPaymentCase) -> dict[str, object]:
+    metadata = {
+        **_payment_metadata(case.payment),
+        "unmatched_payment_case_id": str(case.pk),
+        "unmatched_reason_code": case.reason_code,
+        "status": case.status,
+    }
+    if case.resolved_wallet_id:
+        metadata["wallet_id"] = str(case.resolved_wallet_id)
+        metadata["subscriber_account_number"] = case.resolved_wallet.subscriber.account_number
+    if case.resolution_allocation_id:
+        metadata["allocation_id"] = str(case.resolution_allocation_id)
+    return metadata
 
 
 def _status_transition(old_status: str, new_status: str) -> dict[str, str]:
@@ -401,6 +456,101 @@ def _existing_charge_operation_result(
     return None
 
 
+def _normalize_account_reference(account_reference) -> str:
+    if account_reference is None:
+        return ""
+    return str(account_reference).strip().upper()
+
+
+def _normalize_payload_digest(payload_digest) -> str:
+    if payload_digest is None:
+        return ""
+    digest = str(payload_digest).strip().lower()
+    if digest and not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValidationError("Payload digest must be a SHA-256 hexadecimal digest.")
+    return digest
+
+
+def _unmatched_reason_code(account_reference: str) -> str:
+    if not account_reference:
+        return UnmatchedPaymentCase.REASON_MISSING_REFERENCE
+    if not ACCOUNT_REFERENCE_RE.fullmatch(account_reference):
+        return UnmatchedPaymentCase.REASON_INVALID_REFERENCE
+    return UnmatchedPaymentCase.REASON_SUBSCRIBER_NOT_FOUND
+
+
+def _lock_provider_profile(profile: PaymentProviderProfile) -> PaymentProviderProfile:
+    return PaymentProviderProfile.objects.select_for_update(of=("self",)).get(pk=profile.pk)
+
+
+def _assert_fake_profile_can_ingest(profile: PaymentProviderProfile) -> None:
+    if settings.SUPERSURF_ENVIRONMENT == "PRODUCTION":
+        raise ValidationError("Fake payment ingestion is prohibited in production.")
+    if not profile.is_active:
+        raise ValidationError("Payment provider profile is inactive.")
+    if profile.provider != PaymentProviderProfile.PROVIDER_FAKE:
+        raise ValidationError("Only fake provider profiles may ingest payments in Phase 8.")
+    if profile.product_type != PaymentProviderProfile.PRODUCT_FAKE:
+        raise ValidationError("Only fake product profiles may ingest payments in Phase 8.")
+    if profile.environment not in {
+        PaymentProviderProfile.ENVIRONMENT_TEST,
+        PaymentProviderProfile.ENVIRONMENT_SANDBOX,
+    }:
+        raise ValidationError("Fake payment ingestion requires a test or sandbox profile.")
+
+
+def _assert_payment_equivalent(
+    *,
+    payment: Payment,
+    amount_minor: int,
+    received_at,
+    account_reference: str,
+    payload_digest: str,
+) -> None:
+    if (
+        payment.amount_minor != amount_minor
+        or payment.currency != "KES"
+        or payment.received_at != received_at
+        or payment.account_reference != account_reference
+        or payment.payload_digest != payload_digest
+    ):
+        raise ValidationError("Provider transaction ID was already used differently.")
+
+
+def _find_locked_payment(
+    *,
+    provider_profile: PaymentProviderProfile,
+    provider_transaction_id: str,
+) -> Payment | None:
+    return (
+        Payment.objects.select_for_update(of=("self",))
+        .select_related("provider_profile")
+        .filter(
+            provider_profile=provider_profile,
+            provider_transaction_id=provider_transaction_id,
+        )
+        .first()
+    )
+
+
+def _operation_id_used_elsewhere(operation_id: UUID) -> str:
+    if LedgerEntry.objects.filter(operation_id=operation_id).exists():
+        return "ledger entry"
+    if PaymentAllocation.objects.filter(operation_id=operation_id).exists():
+        return "payment allocation"
+    if BillingPeriod.objects.filter(operation_id=operation_id).exists():
+        return "billing period"
+    if BillingCharge.objects.filter(operation_id=operation_id).exists():
+        return "billing charge"
+    return ""
+
+
+def _reject_operation_id_conflicts(operation_id: UUID) -> None:
+    used_by = _operation_id_used_elsewhere(operation_id)
+    if used_by:
+        raise ValidationError(f"Operation ID was already used for a different {used_by}.")
+
+
 def _is_billing_period_conflict(error: IntegrityError) -> bool:
     diag = getattr(getattr(error, "__cause__", None), "diag", None)
     constraint_name = getattr(diag, "constraint_name", "")
@@ -444,6 +594,33 @@ def _is_billing_charge_conflict(error: IntegrityError) -> bool:
     message = str(error).lower()
     return "billingcharge" in message or (
         "billing_charge" in message and ("unique" in message or "duplicate" in message)
+    )
+
+
+def _is_payment_conflict(error: IntegrityError) -> bool:
+    diag = getattr(getattr(error, "__cause__", None), "diag", None)
+    constraint_name = getattr(diag, "constraint_name", "")
+    if constraint_name in {
+        "payment_provider_transaction_unique",
+        "billing_payment_provider_profile_id_provider_transaction_id_key",
+    }:
+        return True
+    message = str(error).lower()
+    return "payment" in message and ("unique" in message or "duplicate" in message)
+
+
+def _is_payment_allocation_conflict(error: IntegrityError) -> bool:
+    diag = getattr(getattr(error, "__cause__", None), "diag", None)
+    constraint_name = getattr(diag, "constraint_name", "")
+    if constraint_name in {
+        "one_allocation_per_payment",
+        "billing_paymentallocation_operation_id_key",
+        "billing_paymentallocation_ledger_entry_id_key",
+    }:
+        return True
+    message = str(error).lower()
+    return "paymentallocation" in message or (
+        "payment_allocation" in message and ("unique" in message or "duplicate" in message)
     )
 
 
@@ -498,6 +675,58 @@ def _save_billing_charge(charge: BillingCharge) -> BillingCharge:
             raise
         raise ValidationError("The billing charge changed while this form was open.") from exc
     return charge
+
+
+def _create_payment_or_get_existing(payment: Payment) -> tuple[Payment, bool]:
+    try:
+        with transaction.atomic():
+            payment.save()
+    except ValidationError:
+        existing = _find_locked_payment(
+            provider_profile=payment.provider_profile,
+            provider_transaction_id=payment.provider_transaction_id,
+        )
+        if existing is not None:
+            return existing, False
+        raise
+    except IntegrityError as exc:
+        if not _is_payment_conflict(exc):
+            raise
+        existing = _find_locked_payment(
+            provider_profile=payment.provider_profile,
+            provider_transaction_id=payment.provider_transaction_id,
+        )
+        if existing is None:
+            raise ValidationError(STALE_PAYMENT_MESSAGE) from exc
+        return existing, False
+    return payment, True
+
+
+def _save_payment_allocation(allocation: PaymentAllocation) -> PaymentAllocation:
+    try:
+        allocation.save()
+    except ValidationError as exc:
+        if "operation_id" not in getattr(exc, "error_dict", {}):
+            raise
+        raise ValidationError(
+            "Operation ID was already used for a different payment allocation."
+        ) from exc
+    except IntegrityError as exc:
+        if not _is_payment_allocation_conflict(exc):
+            raise
+        raise ValidationError(STALE_PAYMENT_MESSAGE) from exc
+    return allocation
+
+
+def _save_unmatched_case(case: UnmatchedPaymentCase) -> UnmatchedPaymentCase:
+    try:
+        case.save()
+    except IntegrityError as exc:
+        message = str(exc).lower()
+        if "unmatched" not in message or "unique" not in message:
+            raise
+        raise ValidationError(STALE_PAYMENT_MESSAGE) from exc
+    return case
 
 
 def _get_or_create_locked_wallet(subscriber: Subscriber) -> Wallet:
@@ -715,6 +944,349 @@ def _record_billing_charge_event(
         metadata=_billing_charge_metadata(charge),
         reason=reason,
     )
+
+
+def _record_payment_event(
+    *,
+    action: str,
+    payment: Payment,
+    actor,
+    request: HttpRequest | None,
+    reason: str,
+) -> None:
+    record_event(
+        action=action,
+        actor=actor,
+        request=request,
+        target_type="payment",
+        target_identifier=payment.pk,
+        metadata=_payment_metadata(payment),
+        reason=reason,
+    )
+
+
+def _record_payment_allocation_event(
+    *,
+    action: str,
+    allocation: PaymentAllocation,
+    actor,
+    request: HttpRequest | None,
+    reason: str,
+) -> None:
+    record_event(
+        action=action,
+        actor=actor,
+        request=request,
+        target_type="payment_allocation",
+        target_identifier=allocation.pk,
+        metadata=_payment_allocation_metadata(allocation),
+        reason=reason,
+    )
+
+
+def _record_unmatched_case_event(
+    *,
+    action: str,
+    case: UnmatchedPaymentCase,
+    actor,
+    request: HttpRequest | None,
+    reason: str,
+) -> None:
+    record_event(
+        action=action,
+        actor=actor,
+        request=request,
+        target_type="unmatched_payment_case",
+        target_identifier=case.pk,
+        metadata=_unmatched_case_metadata(case),
+        reason=reason,
+    )
+
+
+def _payment_mutation_permissions(actor) -> None:
+    _require_permission(
+        actor,
+        "subscribers.view_subscriber",
+        "billing.view_paymentproviderprofile",
+        "billing.view_payment",
+        "billing.add_payment",
+        "billing.view_paymentallocation",
+        "billing.add_paymentallocation",
+        "billing.view_wallet",
+        "billing.view_ledgerentry",
+        "billing.add_ledgerentry",
+    )
+
+
+def _unmatched_resolution_permissions(actor) -> None:
+    _require_permission(
+        actor,
+        "subscribers.view_subscriber",
+        "billing.view_payment",
+        "billing.view_paymentallocation",
+        "billing.add_paymentallocation",
+        "billing.view_unmatchedpaymentcase",
+        "billing.change_unmatchedpaymentcase",
+        "billing.view_wallet",
+        "billing.view_ledgerentry",
+        "billing.add_ledgerentry",
+    )
+
+
+def _create_payment_wallet_credit(
+    *,
+    payment: Payment,
+    subscriber: Subscriber,
+    operation_id: UUID,
+    actor,
+) -> PaymentAllocation:
+    wallet = _get_or_create_locked_wallet(subscriber)
+    wallet.subscriber = subscriber
+    latest_entry = _lock_latest_ledger_entry(wallet)
+    balance_after = _ledger_resulting_balance(
+        current_balance=_ledger_current_balance(latest_entry),
+        direction=LedgerEntry.DIRECTION_CREDIT,
+        amount_minor=payment.amount_minor,
+    )
+    ledger_entry = _save_ledger_entry(
+        LedgerEntry(
+            wallet=wallet,
+            sequence_number=_ledger_next_sequence(latest_entry),
+            operation_id=operation_id,
+            entry_type=LedgerEntry.ENTRY_PAYMENT_CREDIT,
+            direction=LedgerEntry.DIRECTION_CREDIT,
+            amount_minor=payment.amount_minor,
+            balance_after_minor=balance_after,
+            previous_entry=latest_entry,
+            reverses_entry=None,
+            reason="Payment credit",
+            created_by=actor,
+        )
+    )
+    return _save_payment_allocation(
+        PaymentAllocation(
+            payment=payment,
+            wallet=wallet,
+            ledger_entry=ledger_entry,
+            operation_id=operation_id,
+            allocation_type=PaymentAllocation.ALLOCATION_WALLET_CREDIT,
+            amount_minor=payment.amount_minor,
+            currency="KES",
+            created_by=actor,
+        )
+    )
+
+
+@transaction.atomic
+def ingest_fake_payment(
+    *,
+    provider_profile: PaymentProviderProfile,
+    provider_transaction_id: str,
+    amount,
+    received_at,
+    account_reference,
+    operation_id,
+    actor,
+    payload_digest: str = "",
+    request: HttpRequest | None = None,
+) -> Payment:
+    _payment_mutation_permissions(actor)
+    operation_uuid = _normalize_operation_id(operation_id)
+    amount_minor = _normalize_ledger_amount(amount)
+    received_at = _validate_aware_timestamp(received_at, "Received time")
+    provider_transaction_id = str(provider_transaction_id).strip()
+    if not provider_transaction_id:
+        raise ValidationError("Provider transaction ID is required.")
+    normalized_reference = _normalize_account_reference(account_reference)
+    payload_digest = _normalize_payload_digest(payload_digest)
+
+    locked_profile = _lock_provider_profile(provider_profile)
+    _assert_fake_profile_can_ingest(locked_profile)
+    existing = _find_locked_payment(
+        provider_profile=locked_profile,
+        provider_transaction_id=provider_transaction_id,
+    )
+    if existing is not None:
+        _assert_payment_equivalent(
+            payment=existing,
+            amount_minor=amount_minor,
+            received_at=received_at,
+            account_reference=normalized_reference,
+            payload_digest=payload_digest,
+        )
+        return existing
+
+    _reject_operation_id_conflicts(operation_uuid)
+    payment, created = _create_payment_or_get_existing(
+        Payment(
+            provider_profile=locked_profile,
+            provider_transaction_id=provider_transaction_id,
+            amount_minor=amount_minor,
+            currency="KES",
+            received_at=received_at,
+            account_reference=normalized_reference,
+            payload_digest=payload_digest,
+        )
+    )
+    if not created:
+        _assert_payment_equivalent(
+            payment=payment,
+            amount_minor=amount_minor,
+            received_at=received_at,
+            account_reference=normalized_reference,
+            payload_digest=payload_digest,
+        )
+        return payment
+
+    audit_reason = "Fake payment ingestion"
+    _record_payment_event(
+        action="payment.received",
+        payment=payment,
+        actor=actor,
+        request=request,
+        reason=audit_reason,
+    )
+
+    subscriber = None
+    if ACCOUNT_REFERENCE_RE.fullmatch(normalized_reference):
+        subscriber = (
+            Subscriber.objects.select_for_update(of=("self",))
+            .filter(account_number=normalized_reference)
+            .first()
+        )
+    if subscriber is None:
+        case = _save_unmatched_case(
+            UnmatchedPaymentCase(
+                payment=payment,
+                status=UnmatchedPaymentCase.STATUS_OPEN,
+                reason_code=_unmatched_reason_code(normalized_reference),
+            )
+        )
+        _record_unmatched_case_event(
+            action="payment.unmatched",
+            case=case,
+            actor=actor,
+            request=request,
+            reason=audit_reason,
+        )
+        return payment
+
+    allocation = _create_payment_wallet_credit(
+        payment=payment,
+        subscriber=subscriber,
+        operation_id=operation_uuid,
+        actor=actor,
+    )
+    _record_payment_allocation_event(
+        action="payment.allocated",
+        allocation=allocation,
+        actor=actor,
+        request=request,
+        reason=audit_reason,
+    )
+    _record_ledger_event(
+        action="wallet.payment_credit",
+        entry=allocation.ledger_entry,
+        actor=actor,
+        request=request,
+        reason=audit_reason,
+    )
+    return payment
+
+
+@transaction.atomic
+def resolve_unmatched_payment(
+    *,
+    unmatched_case: UnmatchedPaymentCase,
+    subscriber: Subscriber,
+    operation_id,
+    reason: str,
+    actor,
+    request: HttpRequest | None = None,
+) -> PaymentAllocation:
+    _unmatched_resolution_permissions(actor)
+    operation_uuid = _normalize_operation_id(operation_id)
+    reason = _validate_ledger_reason(reason)
+    case = (
+        UnmatchedPaymentCase.objects.select_for_update(of=("self",))
+        .select_related("payment", "resolution_allocation", "resolved_wallet")
+        .get(pk=unmatched_case.pk)
+    )
+    payment = (
+        Payment.objects.select_for_update(of=("self",))
+        .select_related("provider_profile")
+        .get(pk=case.payment_id)
+    )
+    case.payment = payment
+
+    if case.status == UnmatchedPaymentCase.STATUS_RESOLVED:
+        allocation = case.resolution_allocation
+        if allocation is None:
+            allocation = (
+                PaymentAllocation.objects.select_related("wallet")
+                .filter(payment=payment, operation_id=operation_uuid)
+                .first()
+            )
+        if (
+            allocation is not None
+            and allocation.operation_id == operation_uuid
+            and allocation.payment_id == payment.pk
+            and case.resolved_wallet_id == allocation.wallet_id
+            and allocation.wallet.subscriber_id == subscriber.pk
+            and case.resolution_reason == reason
+        ):
+            return allocation
+        raise ValidationError("This unmatched payment case has already been resolved.")
+    if payment.allocations.exists():
+        raise ValidationError("Payment has already been allocated.")
+
+    _reject_operation_id_conflicts(operation_uuid)
+    locked_subscriber = _lock_subscriber(subscriber)
+    allocation = _create_payment_wallet_credit(
+        payment=payment,
+        subscriber=locked_subscriber,
+        operation_id=operation_uuid,
+        actor=actor,
+    )
+    case.status = UnmatchedPaymentCase.STATUS_RESOLVED
+    case.resolved_wallet = allocation.wallet
+    case.resolution_allocation = allocation
+    case.resolution_reason = reason
+    case.resolved_by = actor
+    case.resolved_at = timezone.now()
+    case._allow_resolution_save = True
+    case.save(
+        update_fields=[
+            "status",
+            "resolved_wallet",
+            "resolution_allocation",
+            "resolution_reason",
+            "resolved_by",
+            "resolved_at",
+        ]
+    )
+    _record_payment_allocation_event(
+        action="payment.allocated",
+        allocation=allocation,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    _record_unmatched_case_event(
+        action="payment.unmatched_resolved",
+        case=case,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    _record_ledger_event(
+        action="wallet.payment_credit",
+        entry=allocation.ledger_entry,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    return allocation
 
 
 @transaction.atomic

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 
 from django.conf import settings
@@ -660,11 +661,13 @@ class LedgerEntry(models.Model):
     ENTRY_MANUAL_CREDIT = "manual_credit"
     ENTRY_MANUAL_DEBIT = "manual_debit"
     ENTRY_BILLING_CHARGE = "billing_charge"
+    ENTRY_PAYMENT_CREDIT = "payment_credit"
     ENTRY_REVERSAL = "reversal"
     ENTRY_TYPE_CHOICES = [
         (ENTRY_MANUAL_CREDIT, "Manual credit"),
         (ENTRY_MANUAL_DEBIT, "Manual debit"),
         (ENTRY_BILLING_CHARGE, "Billing charge"),
+        (ENTRY_PAYMENT_CREDIT, "Payment credit"),
         (ENTRY_REVERSAL, "Reversal"),
     ]
     DIRECTION_CREDIT = "credit"
@@ -775,6 +778,7 @@ class LedgerEntry(models.Model):
                         "manual_credit",
                         "manual_debit",
                         "billing_charge",
+                        "payment_credit",
                         "reversal",
                     ]
                 ),
@@ -789,6 +793,7 @@ class LedgerEntry(models.Model):
                     Q(entry_type="manual_credit", direction="credit")
                     | Q(entry_type="manual_debit", direction="debit")
                     | Q(entry_type="billing_charge", direction="debit")
+                    | Q(entry_type="payment_credit", direction="credit")
                     | Q(entry_type="reversal")
                 ),
                 name="ledger_entry_type_direction_valid",
@@ -806,6 +811,7 @@ class LedgerEntry(models.Model):
                         entry_type__in=["manual_credit", "manual_debit", "billing_charge"],
                         reverses_entry__isnull=True,
                     )
+                    | Q(entry_type="payment_credit", reverses_entry__isnull=True)
                     | Q(entry_type="reversal", reverses_entry__isnull=False)
                 ),
                 name="ledger_entry_reversal_matches_type",
@@ -829,6 +835,7 @@ class LedgerEntry(models.Model):
             self.ENTRY_MANUAL_CREDIT,
             self.ENTRY_MANUAL_DEBIT,
             self.ENTRY_BILLING_CHARGE,
+            self.ENTRY_PAYMENT_CREDIT,
             self.ENTRY_REVERSAL,
         }:
             raise ValidationError({"entry_type": "Ledger entry type is not valid."})
@@ -880,11 +887,19 @@ class LedgerEntry(models.Model):
             and self.direction != self.DIRECTION_DEBIT
         ):
             raise ValidationError({"direction": "Billing charge entries must use debit direction."})
+        if (
+            self.entry_type == self.ENTRY_PAYMENT_CREDIT
+            and self.direction != self.DIRECTION_CREDIT
+        ):
+            raise ValidationError(
+                {"direction": "Payment credit entries must use credit direction."}
+            )
 
         if self.entry_type in {
             self.ENTRY_MANUAL_CREDIT,
             self.ENTRY_MANUAL_DEBIT,
             self.ENTRY_BILLING_CHARGE,
+            self.ENTRY_PAYMENT_CREDIT,
         }:
             if self.reverses_entry_id:
                 raise ValidationError(
@@ -1233,3 +1248,628 @@ class BillingCharge(models.Model):
             raise RuntimeError(
                 f"BillingCharge fields cannot be changed after creation: {names}."
             )
+
+
+class PaymentProviderProfile(models.Model):
+    PROVIDER_FAKE = "fake"
+    PROVIDER_MPESA = "mpesa"
+    PROVIDER_CHOICES = [
+        (PROVIDER_FAKE, "Fake"),
+        (PROVIDER_MPESA, "M-PESA"),
+    ]
+    PRODUCT_FAKE = "fake"
+    PRODUCT_PAYBILL = "paybill"
+    PRODUCT_TILL = "till"
+    PRODUCT_CHOICES = [
+        (PRODUCT_FAKE, "Fake"),
+        (PRODUCT_PAYBILL, "Paybill"),
+        (PRODUCT_TILL, "Till"),
+    ]
+    ENVIRONMENT_TEST = "test"
+    ENVIRONMENT_SANDBOX = "sandbox"
+    ENVIRONMENT_PRODUCTION = "production"
+    ENVIRONMENT_CHOICES = [
+        (ENVIRONMENT_TEST, "Test"),
+        (ENVIRONMENT_SANDBOX, "Sandbox"),
+        (ENVIRONMENT_PRODUCTION, "Production"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=120)
+    provider = models.CharField(max_length=12, choices=PROVIDER_CHOICES)
+    product_type = models.CharField(max_length=12, choices=PRODUCT_CHOICES)
+    environment = models.CharField(max_length=12, choices=ENVIRONMENT_CHOICES)
+    external_identifier = models.CharField(max_length=64)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Payment provider profile"
+        verbose_name_plural = "Payment provider profiles"
+        ordering = ["provider", "product_type", "environment", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "product_type", "environment", "external_identifier"],
+                name="payment_provider_profile_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(provider__in=["fake", "mpesa"]),
+                name="payment_provider_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(product_type__in=["fake", "paybill", "till"]),
+                name="payment_provider_product_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(environment__in=["test", "sandbox", "production"]),
+                name="payment_provider_environment_valid",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args, **kwargs) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        self.name = self.name.strip()
+        self.external_identifier = self.external_identifier.strip()
+        if not self.name:
+            raise ValidationError({"name": "Payment provider profile name is required."})
+        if not self.external_identifier:
+            raise ValidationError({"external_identifier": "External identifier is required."})
+        if self.provider not in {self.PROVIDER_FAKE, self.PROVIDER_MPESA}:
+            raise ValidationError({"provider": "Payment provider is not valid."})
+        if self.product_type not in {
+            self.PRODUCT_FAKE,
+            self.PRODUCT_PAYBILL,
+            self.PRODUCT_TILL,
+        }:
+            raise ValidationError({"product_type": "Payment product type is not valid."})
+        if self.environment not in {
+            self.ENVIRONMENT_TEST,
+            self.ENVIRONMENT_SANDBOX,
+            self.ENVIRONMENT_PRODUCTION,
+        }:
+            raise ValidationError({"environment": "Payment environment is not valid."})
+
+
+class PaymentQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "Payment records cannot be updated through application code."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "Payment records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "Payment records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+
+class PaymentManager(models.Manager):
+    def get_queryset(self):
+        return PaymentQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "Payment records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class Payment(models.Model):
+    IMMUTABLE_FIELDS = (
+        "provider_profile_id",
+        "provider_transaction_id",
+        "amount_minor",
+        "currency",
+        "received_at",
+        "account_reference",
+        "payload_digest",
+        "created_at",
+    )
+    IMMUTABLE_UPDATE_FIELDS = frozenset(IMMUTABLE_FIELDS) | {"provider_profile"}
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    provider_profile = models.ForeignKey(
+        PaymentProviderProfile,
+        on_delete=models.PROTECT,
+        related_name="payments",
+    )
+    provider_transaction_id = models.CharField(max_length=128)
+    amount_minor = models.PositiveIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_MONEY_MINOR)]
+    )
+    currency = models.CharField(max_length=3, default="KES", editable=False)
+    received_at = models.DateTimeField()
+    account_reference = models.CharField(max_length=64, blank=True)
+    payload_digest = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = PaymentManager()
+
+    class Meta:
+        verbose_name = "Payment"
+        verbose_name_plural = "Payments"
+        ordering = ["-received_at", "-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["provider_profile", "provider_transaction_id"],
+                name="payment_provider_tx_idx",
+            ),
+            models.Index(fields=["account_reference"], name="payment_account_ref_idx"),
+            models.Index(fields=["received_at"], name="payment_received_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider_profile", "provider_transaction_id"],
+                name="payment_provider_transaction_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(amount_minor__gt=0),
+                name="payment_amount_positive",
+            ),
+            models.CheckConstraint(condition=Q(currency="KES"), name="payment_currency_kes"),
+        ]
+
+    def __str__(self) -> str:
+        return self.provider_transaction_id
+
+    def save(self, *args, **kwargs) -> None:
+        self._reject_protected_changes(update_fields=kwargs.get("update_fields"))
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        self.provider_transaction_id = self.provider_transaction_id.strip()
+        self.account_reference = self.account_reference.strip().upper()
+        self.payload_digest = self.payload_digest.strip().lower()
+        if not self.provider_transaction_id:
+            raise ValidationError(
+                {"provider_transaction_id": "Provider transaction ID is required."}
+            )
+        if self.amount_minor is not None and self.amount_minor <= 0:
+            raise ValidationError({"amount_minor": "Payment amount must be greater than zero."})
+        if self.amount_minor is not None and self.amount_minor > MAX_MONEY_MINOR:
+            raise ValidationError({"amount_minor": "Payment amount is too large."})
+        if self.currency != "KES":
+            raise ValidationError({"currency": "Payment currency must be KES."})
+        if self.received_at and timezone.is_naive(self.received_at):
+            raise ValidationError({"received_at": "Payment received time must be timezone-aware."})
+        if self.payload_digest and not re.fullmatch(r"[0-9a-f]{64}", self.payload_digest):
+            raise ValidationError({"payload_digest": "Payload digest must be a SHA-256 digest."})
+
+    def delete(self, *args, **kwargs) -> None:
+        msg = "Payment records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    @property
+    def formatted_amount(self) -> str:
+        return format_ksh(self.amount_minor)
+
+    @property
+    def allocated_amount_minor(self) -> int:
+        return sum(allocation.amount_minor for allocation in self.allocations.all())
+
+    @property
+    def is_allocated(self) -> bool:
+        return self.allocated_amount_minor == self.amount_minor
+
+    @property
+    def derived_state(self) -> str:
+        if self.is_allocated:
+            return "allocated"
+        return "unmatched"
+
+    def _reject_protected_changes(self, update_fields=None) -> None:
+        if not self.pk:
+            return
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(
+                self.IMMUTABLE_UPDATE_FIELDS
+            )
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(f"Payment fields cannot be changed after creation: {names}.")
+        try:
+            current = type(self).objects.get(pk=self.pk)
+        except type(self).DoesNotExist:
+            return
+        changed = [
+            field
+            for field in self.IMMUTABLE_FIELDS
+            if getattr(current, field) != getattr(self, field)
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(f"Payment fields cannot be changed after creation: {names}.")
+
+
+class PaymentAllocationQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "PaymentAllocation records cannot be updated through application code."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "PaymentAllocation records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "PaymentAllocation records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+
+class PaymentAllocationManager(models.Manager):
+    def get_queryset(self):
+        return PaymentAllocationQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "PaymentAllocation records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class PaymentAllocation(models.Model):
+    ALLOCATION_WALLET_CREDIT = "wallet_credit"
+    ALLOCATION_TYPE_CHOICES = [(ALLOCATION_WALLET_CREDIT, "Wallet credit")]
+    IMMUTABLE_FIELDS = (
+        "payment_id",
+        "wallet_id",
+        "ledger_entry_id",
+        "operation_id",
+        "allocation_type",
+        "amount_minor",
+        "currency",
+        "created_by_id",
+        "created_at",
+    )
+    IMMUTABLE_UPDATE_FIELDS = frozenset(IMMUTABLE_FIELDS) | {
+        "payment",
+        "wallet",
+        "ledger_entry",
+        "created_by",
+    }
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    payment = models.ForeignKey(Payment, on_delete=models.PROTECT, related_name="allocations")
+    wallet = models.ForeignKey(
+        Wallet,
+        on_delete=models.PROTECT,
+        related_name="payment_allocations",
+    )
+    ledger_entry = models.OneToOneField(
+        LedgerEntry,
+        on_delete=models.PROTECT,
+        related_name="payment_allocation",
+    )
+    operation_id = models.UUIDField(unique=True, editable=False)
+    allocation_type = models.CharField(
+        max_length=20,
+        choices=ALLOCATION_TYPE_CHOICES,
+        default=ALLOCATION_WALLET_CREDIT,
+        editable=False,
+    )
+    amount_minor = models.PositiveIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_MONEY_MINOR)]
+    )
+    currency = models.CharField(max_length=3, default="KES", editable=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_payment_allocations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = PaymentAllocationManager()
+
+    class Meta:
+        verbose_name = "Payment allocation"
+        verbose_name_plural = "Payment allocations"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["payment"], name="payment_allocation_payment_idx"),
+            models.Index(fields=["wallet", "created_at"], name="pay_alloc_wallet_created_idx"),
+            models.Index(fields=["operation_id"], name="payment_alloc_operation_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["payment"], name="one_allocation_per_payment"),
+            models.CheckConstraint(
+                condition=Q(allocation_type="wallet_credit"),
+                name="payment_allocation_type_wallet",
+            ),
+            models.CheckConstraint(
+                condition=Q(amount_minor__gt=0),
+                name="payment_allocation_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(currency="KES"),
+                name="payment_allocation_currency_kes",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.payment} allocation"
+
+    def save(self, *args, **kwargs) -> None:
+        self._reject_protected_changes(update_fields=kwargs.get("update_fields"))
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        if self.allocation_type != self.ALLOCATION_WALLET_CREDIT:
+            raise ValidationError({"allocation_type": "Allocation type must be wallet credit."})
+        if self.currency != "KES":
+            raise ValidationError({"currency": "Payment allocation currency must be KES."})
+        if self.amount_minor is not None and self.amount_minor <= 0:
+            raise ValidationError({"amount_minor": "Allocation amount must be greater than zero."})
+        if self.amount_minor is not None and self.amount_minor > MAX_MONEY_MINOR:
+            raise ValidationError({"amount_minor": "Allocation amount is too large."})
+        if self.payment_id:
+            if self.amount_minor is not None and self.payment.amount_minor != self.amount_minor:
+                raise ValidationError(
+                    {"amount_minor": "Phase 8 allocations must equal the full payment amount."}
+                )
+            if self.payment.currency != self.currency:
+                raise ValidationError(
+                    {"currency": "Allocation currency must match payment currency."}
+                )
+            if self.pk is None and self.payment.allocations.exists():
+                raise ValidationError({"payment": "Payment already has an allocation."})
+        if (
+            self.wallet_id
+            and self.ledger_entry_id
+            and self.ledger_entry.wallet_id != self.wallet_id
+        ):
+            raise ValidationError({"ledger_entry": "Ledger entry must belong to this wallet."})
+        if self.ledger_entry_id:
+            if self.ledger_entry.entry_type != LedgerEntry.ENTRY_PAYMENT_CREDIT:
+                raise ValidationError({"ledger_entry": "Ledger entry must be a payment credit."})
+            if self.ledger_entry.direction != LedgerEntry.DIRECTION_CREDIT:
+                raise ValidationError({"ledger_entry": "Payment credit ledger entry must credit."})
+            if self.ledger_entry.amount_minor != self.amount_minor:
+                raise ValidationError(
+                    {"amount_minor": "Ledger entry amount must match allocation amount."}
+                )
+            if self.ledger_entry.currency != self.currency:
+                raise ValidationError(
+                    {"currency": "Ledger entry currency must match allocation currency."}
+                )
+            if self.ledger_entry.operation_id != self.operation_id:
+                raise ValidationError(
+                    {"operation_id": "Ledger entry operation ID must match allocation."}
+                )
+            if self.created_by_id and self.ledger_entry.created_by_id != self.created_by_id:
+                raise ValidationError(
+                    {"created_by": "Ledger entry operator must match allocation operator."}
+                )
+
+    def delete(self, *args, **kwargs) -> None:
+        msg = "PaymentAllocation records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    @property
+    def formatted_amount(self) -> str:
+        return format_ksh(self.amount_minor)
+
+    def _reject_protected_changes(self, update_fields=None) -> None:
+        if not self.pk:
+            return
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(
+                self.IMMUTABLE_UPDATE_FIELDS
+            )
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(
+                    f"PaymentAllocation fields cannot be changed after creation: {names}."
+                )
+        try:
+            current = type(self).objects.get(pk=self.pk)
+        except type(self).DoesNotExist:
+            return
+        changed = [
+            field
+            for field in self.IMMUTABLE_FIELDS
+            if getattr(current, field) != getattr(self, field)
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(
+                f"PaymentAllocation fields cannot be changed after creation: {names}."
+            )
+
+
+class UnmatchedPaymentCaseQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "UnmatchedPaymentCase records cannot be updated through bulk paths."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "UnmatchedPaymentCase records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "UnmatchedPaymentCase records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+
+class UnmatchedPaymentCaseManager(models.Manager):
+    def get_queryset(self):
+        return UnmatchedPaymentCaseQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "UnmatchedPaymentCase records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class UnmatchedPaymentCase(models.Model):
+    STATUS_OPEN = "open"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"),
+        (STATUS_RESOLVED, "Resolved"),
+    ]
+    REASON_MISSING_REFERENCE = "missing_reference"
+    REASON_INVALID_REFERENCE = "invalid_reference"
+    REASON_SUBSCRIBER_NOT_FOUND = "subscriber_not_found"
+    REASON_CODE_CHOICES = [
+        (REASON_MISSING_REFERENCE, "Missing reference"),
+        (REASON_INVALID_REFERENCE, "Invalid reference"),
+        (REASON_SUBSCRIBER_NOT_FOUND, "Subscriber not found"),
+    ]
+    PROTECTED_FIELDS = ("payment_id", "reason_code", "opened_at")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="unmatched_case",
+    )
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    reason_code = models.CharField(max_length=32, choices=REASON_CODE_CHOICES)
+    resolved_wallet = models.ForeignKey(
+        Wallet,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="resolved_unmatched_payment_cases",
+    )
+    resolution_allocation = models.OneToOneField(
+        PaymentAllocation,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="resolved_unmatched_case",
+    )
+    resolution_reason = models.CharField(max_length=240, blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="resolved_unmatched_payment_cases",
+    )
+    opened_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    objects = UnmatchedPaymentCaseManager()
+
+    class Meta:
+        verbose_name = "Unmatched payment case"
+        verbose_name_plural = "Unmatched payment cases"
+        ordering = ["status", "-opened_at", "-id"]
+        indexes = [
+            models.Index(fields=["status", "opened_at"], name="unmatched_status_opened_idx"),
+            models.Index(fields=["reason_code"], name="unmatched_case_reason_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(status__in=["open", "resolved"]),
+                name="unmatched_case_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(
+                    reason_code__in=[
+                        "missing_reference",
+                        "invalid_reference",
+                        "subscriber_not_found",
+                    ]
+                ),
+                name="unmatched_case_reason_valid",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.payment} unmatched case"
+
+    def save(self, *args, **kwargs) -> None:
+        self._reject_unapproved_resolution(update_fields=kwargs.get("update_fields"))
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        self.resolution_reason = self.resolution_reason.strip()
+        if self.status not in {self.STATUS_OPEN, self.STATUS_RESOLVED}:
+            raise ValidationError({"status": "Unmatched case status is not valid."})
+        if self.reason_code not in {
+            self.REASON_MISSING_REFERENCE,
+            self.REASON_INVALID_REFERENCE,
+            self.REASON_SUBSCRIBER_NOT_FOUND,
+        }:
+            raise ValidationError({"reason_code": "Unmatched reason code is not valid."})
+        resolution_fields = [
+            self.resolved_wallet_id,
+            self.resolution_allocation_id,
+            self.resolution_reason,
+            self.resolved_by_id,
+            self.resolved_at,
+        ]
+        if self.status == self.STATUS_OPEN and any(resolution_fields):
+            raise ValidationError("Open unmatched cases cannot have resolution fields.")
+        if self.status == self.STATUS_RESOLVED:
+            if not all(resolution_fields):
+                raise ValidationError("Resolved unmatched cases require resolution fields.")
+            if timezone.is_naive(self.resolved_at):
+                raise ValidationError({"resolved_at": "Resolution time must be timezone-aware."})
+        if self.resolution_allocation_id:
+            if self.resolution_allocation.payment_id != self.payment_id:
+                raise ValidationError(
+                    {"resolution_allocation": "Resolution allocation must use this payment."}
+                )
+            if (
+                self.resolved_wallet_id
+                and self.resolution_allocation.wallet_id != self.resolved_wallet_id
+            ):
+                raise ValidationError(
+                    {"resolution_allocation": "Resolution allocation must use this wallet."}
+                )
+
+    def delete(self, *args, **kwargs) -> None:
+        msg = "UnmatchedPaymentCase records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    def _reject_unapproved_resolution(self, update_fields=None) -> None:
+        if not self.pk:
+            return
+        try:
+            current = type(self).objects.get(pk=self.pk)
+        except type(self).DoesNotExist:
+            return
+        changed = [
+            field
+            for field in (
+                "status",
+                "resolved_wallet_id",
+                "resolution_allocation_id",
+                "resolution_reason",
+                "resolved_by_id",
+                "resolved_at",
+                *self.PROTECTED_FIELDS,
+            )
+            if getattr(current, field) != getattr(self, field)
+        ]
+        if not changed:
+            return
+        if current.status == self.STATUS_RESOLVED:
+            raise RuntimeError("Resolved unmatched payment cases cannot be changed.")
+        if not getattr(self, "_allow_resolution_save", False):
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(
+                "UnmatchedPaymentCase changes require the resolution service: "
+                f"{names}."
+            )
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(
+                self.PROTECTED_FIELDS
+            )
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(
+                    f"UnmatchedPaymentCase fields cannot be changed: {names}."
+                )

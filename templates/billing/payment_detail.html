@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Payment {{ payment.provider_transaction_id }}{% endblock %}
+
+{% block content %}
+<section class="max-w-4xl">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Payment {{ payment.provider_transaction_id }}</h1>
+      <p class="mt-1 text-sm text-slate-600">{{ payment.provider_profile.name }}</p>
+    </div>
+    {% if allocation %}
+      <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Allocated</span>
+    {% else %}
+      <span class="badge bg-amber-50 text-amber-900 ring-amber-700/20">Unmatched</span>
+    {% endif %}
+  </div>
+
+  <div class="mt-6 grid gap-4 sm:grid-cols-2">
+    <div class="card p-4">
+      <p class="text-sm text-slate-600">Amount</p>
+      <p class="mt-1 text-xl font-semibold">{{ payment.formatted_amount }}</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-sm text-slate-600">Received</p>
+      <p class="mt-1 text-xl font-semibold">{{ payment.received_at|date:"Y-m-d H:i" }}</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-sm text-slate-600">Account reference</p>
+      <p class="mt-1 text-xl font-semibold">{{ payment.account_reference|default:"-" }}</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-sm text-slate-600">Provider</p>
+      <p class="mt-1 text-xl font-semibold">{{ payment.provider_profile.get_provider_display }}</p>
+    </div>
+  </div>
+
+  {% if allocation %}
+    <section class="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div class="border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <h2 class="font-semibold">Wallet allocation</h2>
+      </div>
+      <div class="grid gap-4 p-4 sm:grid-cols-2">
+        <div>
+          <p class="text-sm text-slate-600">Subscriber</p>
+          <p class="font-medium">{{ allocation.wallet.subscriber.account_number }}</p>
+        </div>
+        <div>
+          <p class="text-sm text-slate-600">Wallet</p>
+          <p class="font-medium">{{ allocation.wallet_id }}</p>
+        </div>
+        <div>
+          <p class="text-sm text-slate-600">Ledger sequence</p>
+          <p class="font-medium">{{ allocation.ledger_entry.sequence_number }}</p>
+        </div>
+        <div>
+          <p class="text-sm text-slate-600">Balance after</p>
+          <p class="font-medium">{{ allocation.ledger_entry.formatted_balance_after }}</p>
+        </div>
+      </div>
+    </section>
+  {% elif unmatched_case %}
+    <section class="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+      <h2 class="font-semibold text-amber-950">Unmatched payment</h2>
+      <p class="mt-1 text-sm text-amber-900">{{ unmatched_case.get_reason_code_display }}</p>
+      {% if can_resolve_unmatched %}
+        <a class="btn mt-3" href="{% url 'unmatched_payment_resolve' unmatched_case.pk %}">Resolve</a>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <div class="mt-6 flex flex-wrap gap-2">
+    <a class="btn" href="{% url 'payment_list' %}">Back to payments</a>
+  </div>
+</section>
+{% endblock %}

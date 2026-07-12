@@ -4,7 +4,7 @@
 
 - Subscriber records
 - Sensitive identity fields
-- M-PESA webhook events, payments, allocations, and reconciliation records
+- Payment records, allocations, unmatched-payment cases, and future M-PESA webhook and reconciliation records
 - Wallet balances and ledger entries
 - Invoices and receipts
 - Router credentials
@@ -31,9 +31,9 @@
 
 | Threat | Control |
 | --- | --- |
-| Duplicate M-PESA callbacks double-credit subscriber | Composite provider transaction uniqueness, transactional locks, allocation idempotency tests |
-| Webhook replay using altered identifiers | Persist raw webhook events, validate against provider profile, use canonical payment uniqueness, reject inconsistent replay payloads, audit replay attempts |
-| Forged or malformed callbacks | Strict validation, sandbox-proven callback contract, configured callback URLs, payload persistence, rejection path |
+| Duplicate provider callbacks or retries double-credit subscriber | Provider transaction uniqueness, transactional locks, allocation idempotency tests |
+| Future webhook replay using altered identifiers | Persist raw webhook events, validate against provider profile, use canonical payment uniqueness, reject inconsistent replay payloads, audit replay attempts |
+| Future forged or malformed callbacks | Strict validation, sandbox-proven callback contract, configured callback URLs, payload persistence, rejection path |
 | Assuming callback signatures or fixed Safaricom source IPs without evidence | Block M-PESA implementation until sandbox evidence is collected; do not rely on source-IP allowlisting alone |
 | Concurrent renewal and allocation races | Database transactions, row-level locks, allocation idempotency keys, deterministic renewal services |
 | Lost payment during RouterOS or RADIUS outage | Persist webhook, payment, allocation, and ledger state first; retry network jobs separately |
@@ -70,8 +70,7 @@ Phase 1 and later test suites must include:
 - Financial records cannot be hard-deleted.
 - CSV exports prevent formula injection.
 - Router writes are impossible in dry-run mode.
-- Duplicate callback processing credits once.
-- Concurrent duplicate callbacks credit once.
+- Duplicate provider transaction processing credits once.
+- Concurrent duplicate provider callbacks or retries credit once.
 - Audit events cannot be updated or deleted through application code.
 - Environment banners and production-readiness checks prevent lab-to-production confusion.
-

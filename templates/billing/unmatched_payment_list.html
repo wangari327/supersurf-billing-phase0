@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Unmatched Payments - SuperSurf Billing{% endblock %}
+
+{% block content %}
+<section>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Unmatched payments</h1>
+      <p class="mt-1 text-sm text-slate-600">Valid payments awaiting explicit account resolution</p>
+    </div>
+    <a class="btn" href="{% url 'payment_list' %}">All payments</a>
+  </div>
+
+  <div class="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    {% if page.object_list %}
+      <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+          <tr>
+            <th class="px-4 py-3 text-left">Payment</th>
+            <th class="px-4 py-3 text-left">Reference</th>
+            <th class="px-4 py-3 text-left">Amount</th>
+            <th class="px-4 py-3 text-left">Reason</th>
+            <th class="px-4 py-3 text-left">Status</th>
+            <th class="px-4 py-3 text-left">Action</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {% for case in page.object_list %}
+            <tr>
+              <td class="px-4 py-3">
+                <a class="font-medium" href="{% url 'payment_detail' case.payment.pk %}">{{ case.payment.provider_transaction_id }}</a>
+              </td>
+              <td class="px-4 py-3">{{ case.payment.account_reference|default:"-" }}</td>
+              <td class="px-4 py-3">{{ case.payment.formatted_amount }}</td>
+              <td class="px-4 py-3">{{ case.get_reason_code_display }}</td>
+              <td class="px-4 py-3">{{ case.get_status_display }}</td>
+              <td class="px-4 py-3">
+                {% if case.status == "open" and perms.billing.change_unmatchedpaymentcase %}
+                  <a class="btn" href="{% url 'unmatched_payment_resolve' case.pk %}">Resolve</a>
+                {% else %}
+                  <span class="text-slate-500">-</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="p-6 text-sm text-slate-600">No unmatched payment cases exist.</p>
+    {% endif %}
+  </div>
+
+  {% if page.has_other_pages %}
+    <div class="mt-4 flex gap-2">
+      {% if page.has_previous %}
+        <a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>
+      {% endif %}
+      {% if page.has_next %}
+        <a class="btn" href="?page={{ page.next_page_number }}">Next</a>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Payments - SuperSurf Billing{% endblock %}
+
+{% block content %}
+<section>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Payments</h1>
+      <p class="mt-1 text-sm text-slate-600">Canonical provider-neutral payment records</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      {% if fake_form_visible %}
+        <a class="btn btn-primary" href="{% url 'fake_payment_create' %}">New fake payment</a>
+      {% endif %}
+      {% if perms.billing.view_unmatchedpaymentcase %}
+        <a class="btn" href="{% url 'unmatched_payment_list' %}">Unmatched</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <form method="get" class="mt-6 grid gap-4 rounded-lg border border-slate-200 bg-white p-4 lg:grid-cols-5">
+    <div class="lg:col-span-2">
+      <label class="label" for="{{ form.q.id_for_label }}">{{ form.q.label }}</label>
+      {{ form.q }}
+    </div>
+    <div>
+      <label class="label" for="{{ form.status.id_for_label }}">{{ form.status.label }}</label>
+      {{ form.status }}
+    </div>
+    <div>
+      <label class="label" for="{{ form.provider_profile.id_for_label }}">{{ form.provider_profile.label }}</label>
+      {{ form.provider_profile }}
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <label class="label" for="{{ form.date_from.id_for_label }}">{{ form.date_from.label }}</label>
+        {{ form.date_from }}
+      </div>
+      <div>
+        <label class="label" for="{{ form.date_to.id_for_label }}">{{ form.date_to.label }}</label>
+        {{ form.date_to }}
+      </div>
+    </div>
+    <div class="lg:col-span-5">
+      <button class="btn" type="submit">Apply filters</button>
+      <a class="btn" href="{% url 'payment_list' %}">Clear</a>
+    </div>
+  </form>
+
+  <div class="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    {% if page.object_list %}
+      <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+          <tr>
+            <th class="px-4 py-3 text-left">Transaction</th>
+            <th class="px-4 py-3 text-left">Provider</th>
+            <th class="px-4 py-3 text-left">Reference</th>
+            <th class="px-4 py-3 text-left">Amount</th>
+            <th class="px-4 py-3 text-left">Received</th>
+            <th class="px-4 py-3 text-left">State</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {% for payment in page.object_list %}
+            <tr>
+              <td class="px-4 py-3">
+                <a class="font-medium" href="{% url 'payment_detail' payment.pk %}">{{ payment.provider_transaction_id }}</a>
+              </td>
+              <td class="px-4 py-3">{{ payment.provider_profile.name }}</td>
+              <td class="px-4 py-3">{{ payment.account_reference|default:"-" }}</td>
+              <td class="px-4 py-3">{{ payment.formatted_amount }}</td>
+              <td class="px-4 py-3">{{ payment.received_at|date:"Y-m-d H:i" }}</td>
+              <td class="px-4 py-3">
+                {% if payment.is_allocated %}
+                  <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Allocated</span>
+                {% else %}
+                  <span class="badge bg-amber-50 text-amber-900 ring-amber-700/20">Unmatched</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="p-6 text-sm text-slate-600">No payments match the current filters.</p>
+    {% endif %}
+  </div>
+
+  {% if page.paginator.num_pages > 1 %}
+    <nav class="mt-4 flex gap-2 text-sm" aria-label="Pagination">
+      {% if page.has_previous %}
+        <a class="btn" href="?q={{ query }}&status={{ status }}&page={{ page.previous_page_number }}">Previous</a>
+      {% endif %}
+      <span class="px-3 py-2">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}
+        <a class="btn" href="?q={{ query }}&status={{ status }}&page={{ page.next_page_number }}">Next</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+</section>
+{% endblock %}

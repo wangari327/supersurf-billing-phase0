@@ -2,7 +2,7 @@
 
 This is a Phase 0.5 logical model, not a production migration.
 
-## Implemented Through Phase 7
+## Implemented Through Phase 8
 
 ```mermaid
 erDiagram
@@ -10,6 +10,8 @@ erDiagram
     STAFF_USER ||--o{ AUDIT_EVENT : causes
     SUBSCRIBER ||--o{ SERVICE : owns
     SUBSCRIBER ||--o| WALLET : owns
+    STAFF_USER ||--o{ PAYMENT_ALLOCATION : creates
+    STAFF_USER ||--o{ UNMATCHED_PAYMENT_CASE : resolves
     SERVICE ||--o{ SUBSCRIPTION : has
     SERVICE ||--o{ BILLING_PERIOD : has
     SERVICE ||--o{ BILLING_CHARGE : charged_by
@@ -20,9 +22,16 @@ erDiagram
     BILLING_PERIOD ||--o| BILLING_CHARGE : funded_by
     WALLET ||--o{ LEDGER_ENTRY : records
     WALLET ||--o{ BILLING_CHARGE : funds
+    WALLET ||--o{ PAYMENT_ALLOCATION : receives
+    WALLET ||--o{ UNMATCHED_PAYMENT_CASE : resolves_to
     LEDGER_ENTRY ||--o| LEDGER_ENTRY : precedes
     LEDGER_ENTRY ||--o| LEDGER_ENTRY : reverses
     LEDGER_ENTRY ||--o| BILLING_CHARGE : posts
+    LEDGER_ENTRY ||--o| PAYMENT_ALLOCATION : posts
+    PAYMENT_PROVIDER_PROFILE ||--o{ PAYMENT : identifies
+    PAYMENT ||--o| PAYMENT_ALLOCATION : allocates
+    PAYMENT ||--o| UNMATCHED_PAYMENT_CASE : may_open
+    PAYMENT_ALLOCATION ||--o| UNMATCHED_PAYMENT_CASE : resolves
 
     ORGANIZATION {
         uuid id
@@ -130,6 +139,52 @@ erDiagram
         int created_by_id
         datetime created_at
     }
+    PAYMENT_PROVIDER_PROFILE {
+        uuid id
+        string name
+        string provider
+        string product_type
+        string environment
+        string external_identifier
+        bool is_active
+        datetime created_at
+        datetime updated_at
+    }
+    PAYMENT {
+        uuid id
+        uuid provider_profile_id
+        string provider_transaction_id
+        int amount_minor
+        string currency
+        datetime received_at
+        string account_reference
+        string payload_digest
+        datetime created_at
+    }
+    PAYMENT_ALLOCATION {
+        uuid id
+        uuid payment_id
+        uuid wallet_id
+        uuid ledger_entry_id
+        uuid operation_id
+        string allocation_type
+        int amount_minor
+        string currency
+        int created_by_id
+        datetime created_at
+    }
+    UNMATCHED_PAYMENT_CASE {
+        uuid id
+        uuid payment_id
+        string status
+        string reason_code
+        uuid resolved_wallet_id
+        uuid resolution_allocation_id
+        string resolution_reason
+        int resolved_by_id
+        datetime opened_at
+        datetime resolved_at
+    }
     BILLING_CHARGE {
         uuid id
         uuid service_id
@@ -147,7 +202,9 @@ erDiagram
     }
 ```
 
-`SUBSCRIPTION` is manual package-assignment history. `BILLING_PERIOD` is append-only access-period history with subscription snapshots, manual uncharged activation and renewal, Wallet-funded activation and renewal, and derived billing state. `WALLET` and `LEDGER_ENTRY` are account-level accounting records. `BILLING_CHARGE` links one Wallet-funded billing period to one billing-charge ledger debit. Manual wallet credits do not claim payment receipt, manual debits are not package charges or invoices, and Wallet-funded charges are not invoices or receipts. Discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, installation, and equipment entities remain future work.
+`SUBSCRIPTION` is manual package-assignment history. `BILLING_PERIOD` is append-only access-period history with subscription snapshots, manual uncharged activation and renewal, Wallet-funded activation and renewal, and derived billing state. `WALLET` and `LEDGER_ENTRY` are account-level accounting records. `BILLING_CHARGE` links one Wallet-funded billing period to one billing-charge ledger debit.
+
+`PAYMENT` is a provider-neutral canonical transaction. Phase 8 supports only fake-provider ingestion and one full `PAYMENT_ALLOCATION` to an account-level Wallet through a `payment_credit` ledger entry. `UNMATCHED_PAYMENT_CASE` records valid payments that could not be matched safely to an `SS000001`-style account reference. Manual wallet credits do not claim payment receipt, manual debits are not package charges or invoices, and Wallet-funded charges are not invoices or receipts. Real M-PESA adapters, Safaricom or Daraja calls, Paybill or Till credentials, invoices, receipts, discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, installation, and equipment entities remain future work.
 
 ## Future Logical Model
 
@@ -343,19 +400,19 @@ erDiagram
 
 ## Payment Model Notes
 
-- Every valid provider transaction creates one canonical `Payment`, even when it cannot yet be matched to a subscriber.
+- Every valid Phase 8 fake-provider transaction creates one canonical `Payment`, even when it cannot yet be matched to a subscriber.
 - `UnmatchedPaymentCase` is not an alternative to `Payment`; it is an optional case opened for a canonical payment.
-- `PaymentAllocation` records allocation of payment value to a subscriber, wallet, invoice, or renewal charge.
-- Allocations must not be mutated silently. Corrections require reversal or compensating allocation records linked through `reverses_allocation_id`.
-- Payment lifecycle values should include `received`, `unmatched`, `partially_allocated`, `allocated`, `reversed`, `refunded_externally`, and `rejected` only when no valid financial transaction exists.
-- Provider transaction identifiers are unique within a composite boundary such as `(provider_profile_id, environment, provider_transaction_id)`, not globally.
+- Phase 8 `PaymentAllocation` records one full payment amount credited to a subscriber Wallet. Later controlled split allocation can extend this without replacing `Payment`.
+- Allocations must not be mutated silently. Future corrections require reviewed reversal or compensating allocation records.
+- Phase 8 derives state as unmatched or allocated from allocation existence and amount. Richer lifecycle values remain future work.
+- Provider transaction identifiers are unique within `PaymentProviderProfile`, which includes provider, product type, environment, and external identifier.
 - A sandbox transaction must not collide with a production transaction.
 
 ## Provider Profile Notes
 
-`PaymentProviderProfile` separates Paybill and Till products, sandbox and production environments, shortcode or Till identifier, enabled state, credential reference, callback configuration, and reconciliation configuration.
+Phase 8 `PaymentProviderProfile` separates provider, product type, sandbox/test/production environment, external identifier, and active state. It contains no credentials, tokens, certificates, callback secrets, callback configuration, or reconciliation configuration.
 
-Credentials must not be stored directly in ordinary display fields. Store only encrypted secrets or secret-provider references.
+Future real provider configuration must not store credentials directly in ordinary display fields. Store only encrypted secrets or secret-provider references after a reviewed provider phase approves them.
 
 ## Plan Duration Notes
 

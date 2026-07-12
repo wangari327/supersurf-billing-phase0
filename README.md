@@ -2,9 +2,9 @@
 
 SuperSurf Billing is a planned Kenya-first ISP billing and subscriber-management platform for SuperSurf.
 
-This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, the Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, the Phase 6 wallet ledger foundation, and Phase 7 Wallet-funded activation and renewal charges.
+This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, the Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, the Phase 6 wallet ledger foundation, Phase 7 Wallet-funded activation and renewal charges, and the Phase 8 canonical payment foundation.
 
-Phase 7 deliberately adds only operator-triggered Wallet-funded service-time charges from existing Wallet credit. Manual wallet credits are not proof of payment, partial Wallet balances are rejected, and overpayment remains Wallet credit. It does not include invoices, receipts, discounts, payments, M-PESA implementation, Paybill, Till, automatic wallet allocation, automatic wallet-funded renewal, automatic renewals, automatic expiry, automatic suspension, FreeRADIUS provisioning, PPPoE credentials, RouterOS integration, network provisioning, customer portals, notifications, or live network actions.
+Phase 8 deliberately adds only provider-neutral payment records, fake-provider ingestion for development and tests, account-reference matching, account-level Wallet credits, and unmatched-payment resolution. It does not include Safaricom or Daraja calls, M-PESA callbacks, Paybill or Till credentials, STK Push, reconciliation imports, invoices, receipts, discounts, automatic Wallet spending, automatic renewals, automatic expiry, automatic suspension, FreeRADIUS provisioning, PPPoE credentials, RouterOS integration, network provisioning, customer portals, notifications, or live network actions.
 
 ## Current Deliverables
 
@@ -40,26 +40,30 @@ Phase 7 deliberately adds only operator-triggered Wallet-funded service-time cha
 - Phase 5 manual billing periods, manual renewal date rules, derived billing state, duplicate-operation protection, and paginated period history
 - Phase 6 account-level wallets, append-only ledger entries, manual credits/debits, reversals, and duplicate-operation protection
 - Phase 7 Wallet-funded activation and renewal charges with immutable `BillingCharge` records, billing-charge ledger debits, exact subscription snapshot pricing, and PostgreSQL concurrency coverage
+- Phase 8 canonical payments, fake payment ingestion, account-reference matching, Wallet payment credits, unmatched-payment resolution, and PostgreSQL concurrency coverage
 - GitHub Actions CI
 
 ## Phase Boundary
 
-Phase 7 is complete only for manual operator-triggered Wallet-funded service-time charges. Wallet credit must already exist, Wallet-funded actions do not create or confirm payments, and manual uncharged billing periods remain available for authorized operators. Do not begin the next phase without explicit owner approval.
+Phase 8 is complete only for canonical payment records, fake-provider ingestion, account-level Wallet payment credits, and unmatched-payment resolution. Matched payments credit the subscriber account Wallet, unmatched payments remain valid payment records, partial and overpayments remain Wallet credit, and service renewal remains a separate operator action. Do not begin the next phase without explicit owner approval.
 
 Still absent:
 
 - M-PESA implementation
+- Safaricom or Daraja network calls
+- Paybill or Till credentials
+- M-PESA callbacks
+- STK Push
+- Reconciliation imports
 - Discounts
 - Invoices
 - Receipts
-- Payment recording
-- Payment allocation
 - FreeRADIUS provisioning
 - PPPoE
 - RouterOS integration
 - Network provisioning
 - Automatic renewals
-- Automatic wallet allocation
+- Automatic Wallet spending
 - Automatic expiry
 - Automatic suspension
 - Grace-state automation
@@ -107,6 +111,7 @@ Start with:
 13. `docs/implementation/phase-5-billing-periods.md`
 14. `docs/implementation/phase-6-wallet-ledger.md`
 15. `docs/implementation/phase-7-wallet-funded-renewals.md`
+16. `docs/implementation/phase-8-payment-foundation.md`
 
 ## Production Readiness
 

@@ -1,23 +1,41 @@
 from __future__ import annotations
 
+from datetime import datetime, time
+
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from subscribers.models import Service, Subscriber
 
 from .forms import (
     BillingPeriodActionForm,
+    FakePaymentIngestionForm,
     LedgerReversalForm,
     PackageSearchForm,
+    PaymentSearchForm,
     PlanForm,
+    ResolveUnmatchedPaymentForm,
     SubscriptionPackageForm,
     WalletAdjustmentForm,
 )
-from .models import BillingCharge, BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
+from .models import (
+    BillingCharge,
+    BillingPeriod,
+    LedgerEntry,
+    Payment,
+    PaymentAllocation,
+    Plan,
+    Subscription,
+    UnmatchedPaymentCase,
+    Wallet,
+)
 from .services import (
     activate_billing_period,
     activate_service_from_wallet,
@@ -26,9 +44,11 @@ from .services import (
     change_subscription_package,
     create_package,
     end_subscription,
+    ingest_fake_payment,
     post_manual_wallet_adjustment,
     renew_billing_period,
     renew_service_from_wallet,
+    resolve_unmatched_payment,
     reverse_ledger_entry,
     set_package_active,
     update_package,
@@ -424,6 +444,194 @@ def billing_period_history(request, service_pk):
     )
 
 
+def _end_of_day(value):
+    return timezone.make_aware(datetime.combine(value, time.max))
+
+
+@login_required
+@permission_required("billing.view_payment", raise_exception=True)
+def payment_list(request):
+    form = PaymentSearchForm(request.GET)
+    payments = (
+        Payment.objects.select_related("provider_profile")
+        .prefetch_related("allocations__wallet__subscriber")
+        .order_by("-received_at", "-created_at")
+    )
+    query = ""
+    status = ""
+    provider_profile = None
+    date_from = None
+    date_to = None
+    if form.is_valid():
+        query = form.cleaned_data["q"].strip()
+        status = form.cleaned_data["status"]
+        provider_profile = form.cleaned_data["provider_profile"]
+        date_from = form.cleaned_data["date_from"]
+        date_to = form.cleaned_data["date_to"]
+        if query:
+            payments = payments.filter(
+                Q(provider_transaction_id__icontains=query)
+                | Q(account_reference__icontains=query)
+                | Q(allocations__wallet__subscriber__account_number__icontains=query)
+            ).distinct()
+        if provider_profile is not None:
+            payments = payments.filter(provider_profile=provider_profile)
+        if date_from is not None:
+            payments = payments.filter(received_at__date__gte=date_from)
+        if date_to is not None:
+            payments = payments.filter(received_at__lte=_end_of_day(date_to))
+        if status == "allocated":
+            payments = payments.filter(allocations__isnull=False)
+        elif status == "unmatched":
+            payments = payments.filter(allocations__isnull=True)
+    paginator = Paginator(payments, 20)
+    page = paginator.get_page(request.GET.get("page"))
+    fake_form_visible = (
+        settings.SUPERSURF_ENVIRONMENT != "PRODUCTION"
+        and request.user.has_perm("billing.add_payment")
+        and request.user.has_perm("billing.add_paymentallocation")
+        and request.user.has_perm("billing.add_ledgerentry")
+    )
+    return render(
+        request,
+        "billing/payment_list.html",
+        {
+            "form": form,
+            "page": page,
+            "query": query,
+            "status": status,
+            "provider_profile": provider_profile,
+            "date_from": date_from,
+            "date_to": date_to,
+            "fake_form_visible": fake_form_visible,
+        },
+    )
+
+
+@login_required
+@permission_required("billing.view_payment", raise_exception=True)
+def payment_detail(request, pk):
+    payment = get_object_or_404(Payment.objects.select_related("provider_profile"), pk=pk)
+    allocation = (
+        PaymentAllocation.objects.select_related(
+            "wallet",
+            "wallet__subscriber",
+            "ledger_entry",
+            "created_by",
+        )
+        .filter(payment=payment)
+        .first()
+    )
+    unmatched_case = UnmatchedPaymentCase.objects.filter(payment=payment).first()
+    can_resolve_unmatched = (
+        unmatched_case is not None
+        and unmatched_case.status == UnmatchedPaymentCase.STATUS_OPEN
+        and request.user.has_perm("billing.change_unmatchedpaymentcase")
+        and request.user.has_perm("billing.add_paymentallocation")
+        and request.user.has_perm("billing.add_ledgerentry")
+    )
+    return render(
+        request,
+        "billing/payment_detail.html",
+        {
+            "payment": payment,
+            "allocation": allocation,
+            "unmatched_case": unmatched_case,
+            "can_resolve_unmatched": can_resolve_unmatched,
+        },
+    )
+
+
+@login_required
+@permission_required("billing.view_paymentproviderprofile", raise_exception=True)
+@permission_required("billing.add_payment", raise_exception=True)
+@permission_required("billing.view_payment", raise_exception=True)
+@permission_required("billing.view_paymentallocation", raise_exception=True)
+@permission_required("billing.add_paymentallocation", raise_exception=True)
+@permission_required("billing.view_wallet", raise_exception=True)
+@permission_required("billing.view_ledgerentry", raise_exception=True)
+@permission_required("billing.add_ledgerentry", raise_exception=True)
+def fake_payment_create(request):
+    if settings.SUPERSURF_ENVIRONMENT == "PRODUCTION":
+        messages.error(request, "Fake payment ingestion is not available in production.")
+        return redirect("payment_list")
+    if request.method == "POST":
+        form = FakePaymentIngestionForm(request.POST)
+        if form.is_valid():
+            try:
+                payment = ingest_fake_payment(
+                    provider_profile=form.cleaned_data["provider_profile"],
+                    provider_transaction_id=form.cleaned_data["provider_transaction_id"],
+                    amount=form.cleaned_data["amount_ksh"],
+                    received_at=form.cleaned_data["received_at"],
+                    account_reference=form.cleaned_data["account_reference"],
+                    operation_id=form.cleaned_data["operation_id"],
+                    actor=request.user,
+                    payload_digest=form.cleaned_data["payload_digest"],
+                    request=request,
+                )
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages))
+            else:
+                messages.success(request, "Fake payment ingested.")
+                return redirect("payment_detail", pk=payment.pk)
+    else:
+        form = FakePaymentIngestionForm(initial={"received_at": timezone.now()})
+    return render(request, "billing/fake_payment_form.html", {"form": form})
+
+
+@login_required
+@permission_required("billing.view_unmatchedpaymentcase", raise_exception=True)
+def unmatched_payment_list(request):
+    cases = (
+        UnmatchedPaymentCase.objects.select_related("payment", "payment__provider_profile")
+        .order_by("status", "-opened_at")
+    )
+    paginator = Paginator(cases, 20)
+    page = paginator.get_page(request.GET.get("page"))
+    return render(request, "billing/unmatched_payment_list.html", {"page": page})
+
+
+@login_required
+@permission_required("billing.view_unmatchedpaymentcase", raise_exception=True)
+@permission_required("billing.change_unmatchedpaymentcase", raise_exception=True)
+@permission_required("billing.view_payment", raise_exception=True)
+@permission_required("billing.view_paymentallocation", raise_exception=True)
+@permission_required("billing.add_paymentallocation", raise_exception=True)
+@permission_required("billing.view_wallet", raise_exception=True)
+@permission_required("billing.view_ledgerentry", raise_exception=True)
+@permission_required("billing.add_ledgerentry", raise_exception=True)
+def unmatched_payment_resolve(request, pk):
+    unmatched_case = get_object_or_404(
+        UnmatchedPaymentCase.objects.select_related("payment", "payment__provider_profile"),
+        pk=pk,
+    )
+    if request.method == "POST":
+        form = ResolveUnmatchedPaymentForm(request.POST)
+        if form.is_valid():
+            try:
+                allocation = resolve_unmatched_payment(
+                    unmatched_case=unmatched_case,
+                    subscriber=form.cleaned_data["subscriber"],
+                    operation_id=form.cleaned_data["operation_id"],
+                    reason=form.cleaned_data["reason"],
+                    actor=request.user,
+                    request=request,
+                )
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages))
+            else:
+                messages.success(request, "Unmatched payment resolved.")
+                return redirect("payment_detail", pk=allocation.payment_id)
+    else:
+        form = ResolveUnmatchedPaymentForm()
+    return render(
+        request,
+        "billing/unmatched_payment_resolve.html",
+        {"case": unmatched_case, "form": form},
+    )
+
+
 @login_required
 @permission_required("subscribers.view_subscriber", raise_exception=True)
 @permission_required("billing.view_wallet", raise_exception=True)
@@ -441,6 +649,9 @@ def wallet_detail(request, subscriber_pk):
                 "reverses_entry",
                 "billing_charge",
                 "billing_charge__service",
+                "payment_allocation",
+                "payment_allocation__payment",
+                "payment_allocation__payment__provider_profile",
             )
             .order_by("-sequence_number")
         )
@@ -449,19 +660,27 @@ def wallet_detail(request, subscriber_pk):
     paginator = Paginator(entries, 20)
     page = paginator.get_page(request.GET.get("page"))
     can_view_service_references = request.user.has_perm("subscribers.view_service")
+    can_view_payment = request.user.has_perm("billing.view_payment")
     entry_rows = []
     for entry in page.object_list:
         service_reference = ""
+        payment_reference = ""
         if can_view_service_references and entry.entry_type == LedgerEntry.ENTRY_BILLING_CHARGE:
             try:
                 service_reference = entry.billing_charge.service.service_reference
             except BillingCharge.DoesNotExist:
                 service_reference = ""
+        if can_view_payment and entry.entry_type == LedgerEntry.ENTRY_PAYMENT_CREDIT:
+            try:
+                payment_reference = entry.payment_allocation.payment.provider_transaction_id
+            except PaymentAllocation.DoesNotExist:
+                payment_reference = ""
         entry_rows.append(
             {
                 "entry": entry,
                 "reversal_form": LedgerReversalForm(),
                 "service_reference": service_reference,
+                "payment_reference": payment_reference,
                 "is_reversal": entry.entry_type == LedgerEntry.ENTRY_REVERSAL,
                 "is_reversible": entry.is_reversible,
                 "is_reversed": LedgerEntry.objects.filter(reverses_entry=entry).exists(),

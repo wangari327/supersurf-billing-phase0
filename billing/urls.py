@@ -5,6 +5,15 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("payments/", views.payment_list, name="payment_list"),
+    path("payments/fake/new/", views.fake_payment_create, name="fake_payment_create"),
+    path("payments/<uuid:pk>/", views.payment_detail, name="payment_detail"),
+    path("payments/unmatched/", views.unmatched_payment_list, name="unmatched_payment_list"),
+    path(
+        "payments/unmatched/<uuid:pk>/resolve/",
+        views.unmatched_payment_resolve,
+        name="unmatched_payment_resolve",
+    ),
     path("packages/", views.package_list, name="package_list"),
     path("packages/new/", views.package_create, name="package_create"),
     path("packages/<uuid:pk>/", views.package_detail, name="package_detail"),

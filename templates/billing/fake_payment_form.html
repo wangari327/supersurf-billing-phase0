@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}New Fake Payment - SuperSurf Billing{% endblock %}
+
+{% block content %}
+<section class="max-w-3xl">
+  <div>
+    <h1 class="text-2xl font-semibold">New fake payment</h1>
+    <p class="mt-2 text-sm text-amber-900">The fake provider is for development and tests only. It is not M-PESA and cannot be used in production.</p>
+  </div>
+
+  <form method="post" class="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+    {% csrf_token %}
+    {{ form.operation_id }}
+    <div>
+      <label class="label" for="{{ form.provider_profile.id_for_label }}">{{ form.provider_profile.label }}</label>
+      {{ form.provider_profile }}
+      {{ form.provider_profile.errors }}
+    </div>
+    <div>
+      <label class="label" for="{{ form.provider_transaction_id.id_for_label }}">{{ form.provider_transaction_id.label }}</label>
+      {{ form.provider_transaction_id }}
+      {{ form.provider_transaction_id.errors }}
+    </div>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div>
+        <label class="label" for="{{ form.amount_ksh.id_for_label }}">{{ form.amount_ksh.label }}</label>
+        {{ form.amount_ksh }}
+        {{ form.amount_ksh.errors }}
+      </div>
+      <div>
+        <label class="label" for="{{ form.received_at.id_for_label }}">{{ form.received_at.label }}</label>
+        {{ form.received_at }}
+        {{ form.received_at.errors }}
+      </div>
+    </div>
+    <div>
+      <label class="label" for="{{ form.account_reference.id_for_label }}">{{ form.account_reference.label }}</label>
+      {{ form.account_reference }}
+      {{ form.account_reference.errors }}
+    </div>
+    <div>
+      <label class="label" for="{{ form.payload_digest.id_for_label }}">{{ form.payload_digest.label }}</label>
+      {{ form.payload_digest }}
+      {{ form.payload_digest.errors }}
+    </div>
+    {% if form.non_field_errors %}
+      <div class="text-sm text-rose-700">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <button class="btn btn-primary" type="submit">Ingest fake payment</button>
+    <a class="btn" href="{% url 'payment_list' %}">Cancel</a>
+  </form>
+</section>
+{% endblock %}

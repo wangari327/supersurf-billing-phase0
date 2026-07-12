@@ -17,11 +17,11 @@ Do not create a microservice system for the MVP. Do not create one Django app pe
 
 The database should be PostgreSQL. Background jobs should use Celery with Redis or a reviewed broker alternative. The UI should use Django templates, HTMX, Tailwind CSS, and minimal JavaScript only where needed.
 
-## Implemented Through Phase 7
+## Implemented Through Phase 8
 
-The current application implements the Django foundation, staff users and roles, audit events, organization defaults, package catalog, subscriber registry, service references, manual package assignment with immutable subscription history, manual billing periods with derived billing state, account-level wallet ledger accounting, and operator-triggered Wallet-funded activation and renewal charges.
+The current application implements the Django foundation, staff users and roles, audit events, organization defaults, package catalog, subscriber registry, service references, manual package assignment with immutable subscription history, manual billing periods with derived billing state, account-level wallet ledger accounting, operator-triggered Wallet-funded activation and renewal charges, and canonical payment records with fake-provider Wallet credits.
 
-Phase 7 Wallet-funded charges spend existing Wallet credit to create service-time billing periods. Manual credits do not prove money was received, Wallet-funded charges are not invoices or receipts, and renewal remains operator-triggered. Phase 7 does not create payments, M-PESA records, Paybill or Till callbacks, invoices, receipts, discounts, bundles, automatic wallet allocation, automatic renewals, automatic expiry, automatic suspension, RADIUS data, PPPoE credentials, RouterOS actions, provisioning jobs, customer portals, notifications, or live network actions.
+Phase 8 fake payment ingestion creates provider-neutral payments, matches exact `SS000001`-style account references, credits the account-level Wallet through `payment_credit` ledger entries, and opens unmatched-payment cases when a safe account match is unavailable. Matched payments do not automatically renew services, spend Wallet credit, create invoices or receipts, run reconciliation imports, call Safaricom or Daraja, process real M-PESA callbacks, configure Paybill or Till credentials, provision network access, or perform live network actions.
 
 ## Primary Components
 
@@ -63,11 +63,11 @@ Subscribers, service references, account numbers, and active/inactive status. Se
 
 ### billing
 
-Packages, manual subscription history, manual billing-period history, manual renewals, derived billing state, account-level wallets, append-only ledger entries, manual adjustments, reversals, and operator-triggered Wallet-funded activation and renewal charges. Payment records, invoices, receipts, payment allocation, expiry enforcement, automatic renewal, automatic suspension, and grace-state automation remain future work.
+Packages, manual subscription history, manual billing-period history, manual renewals, derived billing state, account-level wallets, append-only ledger entries, manual adjustments, reversals, operator-triggered Wallet-funded activation and renewal charges, canonical payments, fake payment ingestion, Wallet payment credits, and unmatched-payment cases. Invoices, receipts, real provider adapters, reconciliation imports, expiry enforcement, automatic renewal, automatic suspension, and grace-state automation remain future work.
 
 ### payments
 
-M-PESA callbacks, Paybill matching, Till matching, unmatched payments, reversals, statement imports, reconciliation.
+Future thin provider adapters for M-PESA callbacks, Paybill matching, Till matching, reversals, statement imports, and reconciliation. Phase 8 canonical payments currently live in the `billing` app and expose only fake-provider ingestion for development and tests.
 
 ### network
 
@@ -85,4 +85,4 @@ Append-only audit trail, redaction, export events, before/after snapshots where 
 
 Phase 1 should create the Django foundation, Docker Compose, PostgreSQL, broker, staff authentication, RBAC, organization seed, configurable branding, base UI, audit framework, CI, and initial tests.
 
-Payments, subscribers, ledger, RADIUS, MikroTik, and production M-PESA must wait for later phases.
+This historical Phase 1 scope remains closed. Later phases must still explicitly approve real provider payments, RADIUS, MikroTik, and production M-PESA behavior before implementation.

@@ -69,7 +69,7 @@ Wallet and ledger mutations must go through audited service-layer functions. Wal
 
 Ledger entries store integer KES minor units only. Manual credits are not proof of payment. Manual debits are accounting corrections only and are not package charges, renewal charges, invoices, or receipts. Corrections use reversal entries rather than editing or deletion.
 
-Wallets and ledger entries are immutable in application code after creation. Model save, queryset update, bulk update, model delete, and queryset delete paths are rejected. Direct database access remains outside these application controls.
+Wallets and ledger entries are immutable in application code after creation, including their creation timestamps. Model save, queryset update, bulk update, model delete, and queryset delete paths are rejected. Direct database access remains outside these application controls.
 
 Ledger mutations must lock in subscriber, wallet, latest ledger entry, and reversal-target order. PostgreSQL CI is the authoritative concurrency check for first-wallet creation, sequence allocation, duplicate operation handling, debit balance checks, and reversal races.
 

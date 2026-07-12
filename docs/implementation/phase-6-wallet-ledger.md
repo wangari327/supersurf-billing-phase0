@@ -31,7 +31,7 @@ It does not store a mutable balance, payment reference, M-PESA transaction ID, i
 - protected creating operator foreign key
 - creation timestamp
 
-There is no `updated_at` field on either model.
+There is no `updated_at` field on either model. Creation timestamps are part of the immutable application-level history and cannot be changed through model save paths after creation.
 
 ## Balance
 

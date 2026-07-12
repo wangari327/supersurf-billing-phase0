@@ -558,7 +558,8 @@ class WalletManager(models.Manager):
 
 
 class Wallet(models.Model):
-    IMMUTABLE_FIELDS = ("subscriber_id", "currency")
+    IMMUTABLE_FIELDS = ("subscriber_id", "currency", "created_at")
+    IMMUTABLE_UPDATE_FIELDS = frozenset(IMMUTABLE_FIELDS) | {"subscriber"}
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     subscriber = models.OneToOneField(
@@ -582,7 +583,7 @@ class Wallet(models.Model):
         return f"{self.subscriber.account_number} wallet"
 
     def save(self, *args, **kwargs) -> None:
-        self._reject_protected_changes()
+        self._reject_protected_changes(update_fields=kwargs.get("update_fields"))
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -606,9 +607,18 @@ class Wallet(models.Model):
     def formatted_balance(self) -> str:
         return format_ksh(self.balance_minor)
 
-    def _reject_protected_changes(self) -> None:
+    def _reject_protected_changes(self, update_fields=None) -> None:
         if not self.pk:
             return
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(
+                self.IMMUTABLE_UPDATE_FIELDS
+            )
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(
+                    f"Wallet fields cannot be changed after creation: {names}."
+                )
         try:
             current = type(self).objects.get(pk=self.pk)
         except type(self).DoesNotExist:
@@ -674,7 +684,14 @@ class LedgerEntry(models.Model):
         "reverses_entry_id",
         "reason",
         "created_by_id",
+        "created_at",
     )
+    IMMUTABLE_UPDATE_FIELDS = frozenset(IMMUTABLE_FIELDS) | {
+        "wallet",
+        "previous_entry",
+        "reverses_entry",
+        "created_by",
+    }
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     wallet = models.ForeignKey(Wallet, on_delete=models.PROTECT, related_name="entries")
@@ -781,7 +798,7 @@ class LedgerEntry(models.Model):
         return f"{self.wallet} ledger entry {self.sequence_number}"
 
     def save(self, *args, **kwargs) -> None:
-        self._reject_protected_changes()
+        self._reject_protected_changes(update_fields=kwargs.get("update_fields"))
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -903,9 +920,18 @@ class LedgerEntry(models.Model):
                 {"direction": "Reversal direction must oppose the original entry."}
             )
 
-    def _reject_protected_changes(self) -> None:
+    def _reject_protected_changes(self, update_fields=None) -> None:
         if not self.pk:
             return
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(
+                self.IMMUTABLE_UPDATE_FIELDS
+            )
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(
+                    f"LedgerEntry fields cannot be changed after creation: {names}."
+                )
         try:
             current = type(self).objects.get(pk=self.pk)
         except type(self).DoesNotExist:

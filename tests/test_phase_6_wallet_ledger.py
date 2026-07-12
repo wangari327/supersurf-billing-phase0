@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from decimal import Decimal
 from threading import Barrier
 
@@ -12,6 +13,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.urls import NoReverseMatch, reverse
+from django.utils import timezone
 
 import billing.services as billing_services
 from audit.models import AuditEvent
@@ -99,6 +101,10 @@ def post_adjustment(
     )
 
 
+def immutable_test_timestamp() -> datetime:
+    return timezone.make_aware(datetime(2001, 1, 1, 12, 0, 0), timezone.get_current_timezone())
+
+
 @pytest.mark.django_db
 def test_viewing_subscriber_without_wallet_shows_zero_without_creating_wallet(client, seeded_roles):
     subscriber = create_test_subscriber()
@@ -131,6 +137,68 @@ def test_first_adjustment_creates_wallet_and_credit_sequence(seeded_roles):
     assert wallet.balance_minor == 150050
     assert wallet.formatted_balance == "KSh 1,500.50"
     assert wallet.currency == "KES"
+
+
+@pytest.mark.django_db
+def test_wallet_created_at_cannot_be_changed_through_instance_save(seeded_roles):
+    actor = admin_actor(seeded_roles)
+    subscriber = create_test_subscriber()
+    entry = post_adjustment(subscriber, actor)
+    wallet = entry.wallet
+    original_created_at = Wallet.objects.get(pk=wallet.pk).created_at
+
+    wallet.created_at = immutable_test_timestamp()
+    with pytest.raises(RuntimeError, match="created_at"):
+        wallet.save()
+
+    wallet.refresh_from_db()
+    assert wallet.created_at == original_created_at
+
+
+@pytest.mark.django_db
+def test_wallet_created_at_cannot_be_changed_with_update_fields(seeded_roles):
+    actor = admin_actor(seeded_roles)
+    subscriber = create_test_subscriber()
+    entry = post_adjustment(subscriber, actor)
+    wallet = entry.wallet
+    original_created_at = Wallet.objects.get(pk=wallet.pk).created_at
+
+    wallet.created_at = immutable_test_timestamp()
+    with pytest.raises(RuntimeError, match="created_at"):
+        wallet.save(update_fields=["created_at"])
+
+    wallet.refresh_from_db()
+    assert wallet.created_at == original_created_at
+
+
+@pytest.mark.django_db
+def test_ledger_entry_created_at_cannot_be_changed_through_instance_save(seeded_roles):
+    actor = admin_actor(seeded_roles)
+    subscriber = create_test_subscriber()
+    entry = post_adjustment(subscriber, actor)
+    original_created_at = LedgerEntry.objects.get(pk=entry.pk).created_at
+
+    entry.created_at = immutable_test_timestamp()
+    with pytest.raises(RuntimeError, match="created_at"):
+        entry.save()
+
+    entry.refresh_from_db()
+    assert entry.created_at == original_created_at
+
+
+@pytest.mark.django_db
+def test_ledger_entry_created_at_cannot_be_changed_with_update_fields(seeded_roles):
+    actor = admin_actor(seeded_roles)
+    subscriber = create_test_subscriber()
+    entry = post_adjustment(subscriber, actor)
+    original_created_at = LedgerEntry.objects.get(pk=entry.pk).created_at
+
+    entry.created_at = immutable_test_timestamp()
+    with pytest.raises(RuntimeError, match="created_at"):
+        entry.save(update_fields=["created_at"])
+
+    entry.refresh_from_db()
+    assert entry.created_at == original_created_at
 
 
 @pytest.mark.django_db

@@ -36,10 +36,14 @@
             <th class="px-4 py-3 text-left">Start</th>
             <th class="px-4 py-3 text-left">Expiry</th>
             <th class="px-4 py-3 text-left">Grace until</th>
+            {% if can_view_charge_details %}
+              <th class="px-4 py-3 text-left">Funding</th>
+            {% endif %}
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-200">
-          {% for period in page.object_list %}
+          {% for row in period_rows %}
+            {% with period=row.period charge=row.charge %}
             <tr>
               <td class="px-4 py-3 font-medium">{{ period.sequence_number }}</td>
               <td class="px-4 py-3">{{ period.get_period_type_display }}</td>
@@ -51,7 +55,18 @@
               <td class="px-4 py-3">{{ period.starts_at|date:"Y-m-d H:i" }}</td>
               <td class="px-4 py-3">{{ period.expires_at|date:"Y-m-d H:i" }}</td>
               <td class="px-4 py-3">{{ period.grace_until|date:"Y-m-d H:i" }}</td>
+              {% if can_view_charge_details %}
+                <td class="px-4 py-3">
+                  {% if charge %}
+                    <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Wallet funded</span>
+                    <p class="mt-1 text-slate-600">{{ charge.formatted_amount }}</p>
+                  {% else %}
+                    <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Manual uncharged</span>
+                  {% endif %}
+                </td>
+              {% endif %}
             </tr>
+            {% endwith %}
           {% endfor %}
         </tbody>
       </table>

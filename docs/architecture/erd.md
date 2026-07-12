@@ -2,7 +2,7 @@
 
 This is a Phase 0.5 logical model, not a production migration.
 
-## Implemented Through Phase 6
+## Implemented Through Phase 7
 
 ```mermaid
 erDiagram
@@ -12,12 +12,17 @@ erDiagram
     SUBSCRIBER ||--o| WALLET : owns
     SERVICE ||--o{ SUBSCRIPTION : has
     SERVICE ||--o{ BILLING_PERIOD : has
+    SERVICE ||--o{ BILLING_CHARGE : charged_by
     PLAN ||--o{ SUBSCRIPTION : snapshots
     SUBSCRIPTION ||--o{ BILLING_PERIOD : snapshots
+    SUBSCRIPTION ||--o{ BILLING_CHARGE : priced_by
     BILLING_PERIOD ||--o| BILLING_PERIOD : precedes
+    BILLING_PERIOD ||--o| BILLING_CHARGE : funded_by
     WALLET ||--o{ LEDGER_ENTRY : records
+    WALLET ||--o{ BILLING_CHARGE : funds
     LEDGER_ENTRY ||--o| LEDGER_ENTRY : precedes
     LEDGER_ENTRY ||--o| LEDGER_ENTRY : reverses
+    LEDGER_ENTRY ||--o| BILLING_CHARGE : posts
 
     ORGANIZATION {
         uuid id
@@ -125,9 +130,24 @@ erDiagram
         int created_by_id
         datetime created_at
     }
+    BILLING_CHARGE {
+        uuid id
+        uuid service_id
+        uuid subscription_id
+        uuid billing_period_id
+        uuid wallet_id
+        uuid ledger_entry_id
+        uuid operation_id
+        string charge_type
+        int amount_minor
+        string currency
+        string reason
+        int created_by_id
+        datetime created_at
+    }
 ```
 
-`SUBSCRIPTION` is manual package-assignment history. `BILLING_PERIOD` is append-only manual access-period history with subscription snapshots, manual activation and renewal, and derived billing state. `WALLET` and `LEDGER_ENTRY` are account-level manual accounting records. Manual wallet credits do not claim payment receipt, and manual debits are not package charges or invoices. Billing charges, invoices, discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, installation, and equipment entities remain future work.
+`SUBSCRIPTION` is manual package-assignment history. `BILLING_PERIOD` is append-only access-period history with subscription snapshots, manual uncharged activation and renewal, Wallet-funded activation and renewal, and derived billing state. `WALLET` and `LEDGER_ENTRY` are account-level accounting records. `BILLING_CHARGE` links one Wallet-funded billing period to one billing-charge ledger debit. Manual wallet credits do not claim payment receipt, manual debits are not package charges or invoices, and Wallet-funded charges are not invoices or receipts. Discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, installation, and equipment entities remain future work.
 
 ## Future Logical Model
 

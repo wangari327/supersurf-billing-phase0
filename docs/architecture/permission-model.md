@@ -17,7 +17,7 @@ Finance must not change router credentials, RADIUS secrets, or network integrati
 
 NOC must not create manual wallet credits, alter ledger entries, or view unnecessary M-PESA credentials.
 
-SuperSurf Support must not modify ledger entries, change plans without authority, configure integrations, or disconnect sessions unless explicitly granted.
+SuperSurf Support must not modify ledger entries, post Wallet-funded charges, change plans without authority, configure integrations, or disconnect sessions unless explicitly granted.
 
 Read Only must not write.
 
@@ -38,4 +38,3 @@ Require Owner or explicitly delegated permission:
 ## Implementation Notes
 
 Use Django auth as the base. Evaluate `django-guardian` or `rules` for object-level permissions where necessary. Do not overbuild a policy engine before Phase 1 proves the need.
-

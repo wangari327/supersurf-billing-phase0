@@ -17,11 +17,11 @@ Do not create a microservice system for the MVP. Do not create one Django app pe
 
 The database should be PostgreSQL. Background jobs should use Celery with Redis or a reviewed broker alternative. The UI should use Django templates, HTMX, Tailwind CSS, and minimal JavaScript only where needed.
 
-## Implemented Through Phase 6
+## Implemented Through Phase 7
 
-The current application implements the Django foundation, staff users and roles, audit events, organization defaults, package catalog, subscriber registry, service references, manual package assignment with immutable subscription history, manual billing periods with derived billing state, and account-level wallet ledger accounting.
+The current application implements the Django foundation, staff users and roles, audit events, organization defaults, package catalog, subscriber registry, service references, manual package assignment with immutable subscription history, manual billing periods with derived billing state, account-level wallet ledger accounting, and operator-triggered Wallet-funded activation and renewal charges.
 
-Phase 6 wallets and ledger entries are manual accounting records, not payment records. Manual credits do not prove money was received, and manual debits are not charges or invoices. Phase 6 does not create payments, M-PESA records, Paybill or Till callbacks, charges, invoices, receipts, renewal charges, automatic renewals, automatic expiry, automatic suspension, RADIUS data, PPPoE credentials, RouterOS actions, provisioning jobs, customer portals, notifications, or live network actions.
+Phase 7 Wallet-funded charges spend existing Wallet credit to create service-time billing periods. Manual credits do not prove money was received, Wallet-funded charges are not invoices or receipts, and renewal remains operator-triggered. Phase 7 does not create payments, M-PESA records, Paybill or Till callbacks, invoices, receipts, discounts, bundles, automatic wallet allocation, automatic renewals, automatic expiry, automatic suspension, RADIUS data, PPPoE credentials, RouterOS actions, provisioning jobs, customer portals, notifications, or live network actions.
 
 ## Primary Components
 
@@ -63,7 +63,7 @@ Subscribers, service references, account numbers, and active/inactive status. Se
 
 ### billing
 
-Packages, manual subscription history, manual billing-period history, manual renewals, derived billing state, account-level wallets, append-only ledger entries, manual adjustments, and reversals. Payment records, renewal charges, invoices, receipts, payment allocation, expiry enforcement, automatic renewal, automatic suspension, and grace-state automation remain future work.
+Packages, manual subscription history, manual billing-period history, manual renewals, derived billing state, account-level wallets, append-only ledger entries, manual adjustments, reversals, and operator-triggered Wallet-funded activation and renewal charges. Payment records, invoices, receipts, payment allocation, expiry enforcement, automatic renewal, automatic suspension, and grace-state automation remain future work.
 
 ### payments
 

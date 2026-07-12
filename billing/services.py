@@ -12,7 +12,15 @@ from django.utils import timezone
 from audit.service import record_event
 from subscribers.models import Service, Subscriber
 
-from .models import MAX_MONEY_MINOR, BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
+from .models import (
+    MAX_MONEY_MINOR,
+    BillingCharge,
+    BillingPeriod,
+    LedgerEntry,
+    Plan,
+    Subscription,
+    Wallet,
+)
 from .money import ksh_to_minor_units
 
 AUDITED_FIELDS = [
@@ -121,6 +129,30 @@ def _ledger_entry_metadata(entry: LedgerEntry) -> dict[str, object]:
         "currency": entry.currency,
         "reversed_entry_id": str(entry.reverses_entry_id) if entry.reverses_entry_id else "",
         "created_at": entry.created_at.isoformat() if entry.created_at else "",
+    }
+
+
+def _billing_charge_metadata(charge: BillingCharge) -> dict[str, object]:
+    period = charge.billing_period
+    ledger_entry = charge.ledger_entry
+    return {
+        "subscriber_account_number": charge.service.subscriber.account_number,
+        "service_reference": charge.service.service_reference,
+        "wallet_id": str(charge.wallet_id),
+        "subscription_id": str(charge.subscription_id),
+        "billing_period_id": str(charge.billing_period_id),
+        "billing_charge_id": str(charge.pk),
+        "ledger_entry_id": str(charge.ledger_entry_id),
+        "charge_type": charge.charge_type,
+        "amount_minor": charge.amount_minor,
+        "balance_after_minor": ledger_entry.balance_after_minor,
+        "currency": charge.currency,
+        "effective_timestamp": period.effective_at.isoformat(),
+        "starts_at": period.starts_at.isoformat(),
+        "expires_at": period.expires_at.isoformat(),
+        "grace_until": period.grace_until.isoformat(),
+        "ledger_sequence_number": ledger_entry.sequence_number,
+        "period_sequence_number": period.sequence_number,
     }
 
 
@@ -334,6 +366,41 @@ def _existing_operation_result(
     raise ValidationError("Operation ID was already used for a different billing period.")
 
 
+def _existing_charge_operation_result(
+    *,
+    service: Service,
+    operation_id: UUID,
+    charge_type: str,
+    expected_previous_period_id: UUID | None,
+    reason: str,
+) -> BillingCharge | None:
+    charge = (
+        BillingCharge.objects.select_related(
+            "service",
+            "subscription",
+            "billing_period",
+            "ledger_entry",
+        )
+        .filter(operation_id=operation_id)
+        .first()
+    )
+    if charge is not None:
+        if (
+            charge.service_id == service.pk
+            and charge.charge_type == charge_type
+            and charge.billing_period.previous_period_id == expected_previous_period_id
+            and charge.amount_minor == charge.billing_period.price_minor
+            and charge.reason == reason
+        ):
+            return charge
+        raise ValidationError("Operation ID was already used for a different billing charge.")
+    if BillingPeriod.objects.filter(operation_id=operation_id).exists():
+        raise ValidationError("Operation ID was already used for a different billing period.")
+    if LedgerEntry.objects.filter(operation_id=operation_id).exists():
+        raise ValidationError("Operation ID was already used for a different ledger entry.")
+    return None
+
+
 def _is_billing_period_conflict(error: IntegrityError) -> bool:
     diag = getattr(getattr(error, "__cause__", None), "diag", None)
     constraint_name = getattr(diag, "constraint_name", "")
@@ -363,6 +430,21 @@ def _is_ledger_conflict(error: IntegrityError) -> bool:
         return True
     message = str(error).lower()
     return "ledger" in message and ("unique" in message or "duplicate" in message)
+
+
+def _is_billing_charge_conflict(error: IntegrityError) -> bool:
+    diag = getattr(getattr(error, "__cause__", None), "diag", None)
+    constraint_name = getattr(diag, "constraint_name", "")
+    if constraint_name in {
+        "billing_billingcharge_operation_id_key",
+        "billing_billingcharge_billing_period_id_key",
+        "billing_billingcharge_ledger_entry_id_key",
+    }:
+        return True
+    message = str(error).lower()
+    return "billingcharge" in message or (
+        "billing_charge" in message and ("unique" in message or "duplicate" in message)
+    )
 
 
 def _save_billing_period(period: BillingPeriod) -> BillingPeriod:
@@ -402,11 +484,34 @@ def _save_ledger_entry(entry: LedgerEntry) -> LedgerEntry:
     return entry
 
 
+def _save_billing_charge(charge: BillingCharge) -> BillingCharge:
+    try:
+        charge.save()
+    except ValidationError as exc:
+        if "operation_id" not in getattr(exc, "error_dict", {}):
+            raise
+        raise ValidationError(
+            "Operation ID was already used for a different billing charge."
+        ) from exc
+    except IntegrityError as exc:
+        if not _is_billing_charge_conflict(exc):
+            raise
+        raise ValidationError("The billing charge changed while this form was open.") from exc
+    return charge
+
+
 def _get_or_create_locked_wallet(subscriber: Subscriber) -> Wallet:
     try:
         return Wallet.objects.select_for_update(of=("self",)).get(subscriber=subscriber)
     except Wallet.DoesNotExist:
         return _save_wallet(Wallet(subscriber=subscriber))
+
+
+def _lock_existing_wallet(subscriber: Subscriber) -> Wallet:
+    try:
+        return Wallet.objects.select_for_update(of=("self",)).get(subscriber=subscriber)
+    except Wallet.DoesNotExist as exc:
+        raise ValidationError("An existing wallet is required for Wallet-funded billing.") from exc
 
 
 def _lock_latest_ledger_entry(wallet: Wallet) -> LedgerEntry | None:
@@ -589,6 +694,25 @@ def _record_ledger_event(
         target_type="ledger_entry",
         target_identifier=entry.pk,
         metadata=_ledger_entry_metadata(entry),
+        reason=reason,
+    )
+
+
+def _record_billing_charge_event(
+    *,
+    action: str,
+    charge: BillingCharge,
+    actor,
+    request: HttpRequest | None,
+    reason: str,
+) -> None:
+    record_event(
+        action=action,
+        actor=actor,
+        request=request,
+        target_type="billing_charge",
+        target_identifier=charge.pk,
+        metadata=_billing_charge_metadata(charge),
         reason=reason,
     )
 
@@ -965,6 +1089,210 @@ def renew_billing_period(
         reason=reason,
     )
     return period
+
+
+def _wallet_charge_permissions(actor) -> None:
+    _require_permission(
+        actor,
+        "subscribers.view_subscriber",
+        "subscribers.view_service",
+        "billing.view_subscription",
+        "billing.view_billingperiod",
+        "billing.add_billingperiod",
+        "billing.view_wallet",
+        "billing.view_ledgerentry",
+        "billing.add_ledgerentry",
+        "billing.view_billingcharge",
+        "billing.add_billingcharge",
+    )
+
+
+@transaction.atomic
+def _post_wallet_funded_period(
+    *,
+    service: Service,
+    operation_id,
+    expected_previous_period_id,
+    reason: str,
+    actor,
+    request: HttpRequest | None,
+    effective_at,
+    charge_type: str,
+) -> BillingCharge:
+    _wallet_charge_permissions(actor)
+    reason = _validate_ledger_reason(reason)
+    operation_uuid = _normalize_operation_id(operation_id)
+    expected_previous_uuid = _normalize_expected_previous_period_id(expected_previous_period_id)
+    if charge_type == BillingCharge.CHARGE_ACTIVATION and expected_previous_uuid is not None:
+        raise ValidationError("First activation cannot include a previous billing period.")
+    if charge_type == BillingCharge.CHARGE_RENEWAL and expected_previous_uuid is None:
+        raise ValidationError("Renewal requires the latest billing period.")
+
+    existing = _existing_charge_operation_result(
+        service=service,
+        operation_id=operation_uuid,
+        charge_type=charge_type,
+        expected_previous_period_id=expected_previous_uuid,
+        reason=reason,
+    )
+    if existing is not None:
+        return existing
+
+    locked_service = _lock_service_and_subscriber(service)
+    wallet = _lock_existing_wallet(locked_service.subscriber)
+    wallet.subscriber = locked_service.subscriber
+    locked_subscription = _assert_billing_period_eligibility(
+        service=locked_service,
+        subscription=_lock_current_active_subscription(locked_service),
+        action="activated" if charge_type == BillingCharge.CHARGE_ACTIVATION else "renewed",
+    )
+    latest_period = _lock_latest_billing_period(locked_service)
+    latest_entry = _lock_latest_ledger_entry(wallet)
+
+    existing = _existing_charge_operation_result(
+        service=locked_service,
+        operation_id=operation_uuid,
+        charge_type=charge_type,
+        expected_previous_period_id=expected_previous_uuid,
+        reason=reason,
+    )
+    if existing is not None:
+        return existing
+
+    if charge_type == BillingCharge.CHARGE_ACTIVATION:
+        period_type = BillingPeriod.PERIOD_ACTIVATION
+        period_action = "billing_period.activated"
+        if latest_period is not None:
+            raise ValidationError("Billing period history already exists for this service.")
+        next_period_sequence = 1
+        previous_period = None
+    else:
+        period_type = BillingPeriod.PERIOD_RENEWAL
+        period_action = "billing_period.renewed"
+        if latest_period is None:
+            raise ValidationError("Renewal requires an existing billing period.")
+        if latest_period.pk != expected_previous_uuid:
+            raise ValidationError(STALE_BILLING_PERIOD_MESSAGE)
+        next_period_sequence = latest_period.sequence_number + 1
+        previous_period = latest_period
+
+    amount_minor = locked_subscription.price_minor
+    current_balance = _ledger_current_balance(latest_entry)
+    if current_balance < amount_minor:
+        raise ValidationError("Wallet balance is insufficient for this charge.")
+    balance_after = _ledger_resulting_balance(
+        current_balance=current_balance,
+        direction=LedgerEntry.DIRECTION_DEBIT,
+        amount_minor=amount_minor,
+    )
+    effective_at = _validate_aware_timestamp(effective_at or timezone.now(), "Effective time")
+    period = _save_billing_period(
+        _create_billing_period(
+            service=locked_service,
+            subscription=locked_subscription,
+            sequence_number=next_period_sequence,
+            period_type=period_type,
+            operation_id=operation_uuid,
+            previous_period=previous_period,
+            effective_at=effective_at,
+        )
+    )
+    ledger_entry = _save_ledger_entry(
+        LedgerEntry(
+            wallet=wallet,
+            sequence_number=_ledger_next_sequence(latest_entry),
+            operation_id=operation_uuid,
+            entry_type=LedgerEntry.ENTRY_BILLING_CHARGE,
+            direction=LedgerEntry.DIRECTION_DEBIT,
+            amount_minor=amount_minor,
+            balance_after_minor=balance_after,
+            previous_entry=latest_entry,
+            reverses_entry=None,
+            reason=reason,
+            created_by=actor,
+        )
+    )
+    charge = _save_billing_charge(
+        BillingCharge(
+            service=locked_service,
+            subscription=locked_subscription,
+            billing_period=period,
+            wallet=wallet,
+            ledger_entry=ledger_entry,
+            operation_id=operation_uuid,
+            charge_type=charge_type,
+            amount_minor=amount_minor,
+            currency="KES",
+            reason=reason,
+            created_by=actor,
+        )
+    )
+    _record_billing_period_event(
+        action=period_action,
+        period=period,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    _record_billing_charge_event(
+        action="billing_charge.posted",
+        charge=charge,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    _record_ledger_event(
+        action="wallet.billing_charge",
+        entry=ledger_entry,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    return charge
+
+
+def activate_service_from_wallet(
+    *,
+    service: Service,
+    operation_id,
+    expected_previous_period_id,
+    reason: str,
+    actor,
+    request: HttpRequest | None = None,
+    effective_at=None,
+) -> BillingCharge:
+    return _post_wallet_funded_period(
+        service=service,
+        operation_id=operation_id,
+        expected_previous_period_id=expected_previous_period_id,
+        reason=reason,
+        actor=actor,
+        request=request,
+        effective_at=effective_at,
+        charge_type=BillingCharge.CHARGE_ACTIVATION,
+    )
+
+
+def renew_service_from_wallet(
+    *,
+    service: Service,
+    operation_id,
+    expected_previous_period_id,
+    reason: str,
+    actor,
+    request: HttpRequest | None = None,
+    effective_at=None,
+) -> BillingCharge:
+    return _post_wallet_funded_period(
+        service=service,
+        operation_id=operation_id,
+        expected_previous_period_id=expected_previous_period_id,
+        reason=reason,
+        actor=actor,
+        request=request,
+        effective_at=effective_at,
+        charge_type=BillingCharge.CHARGE_RENEWAL,
+    )
 
 
 @transaction.atomic

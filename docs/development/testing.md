@@ -97,7 +97,7 @@ On the development machine, the Playwright browser download timed out, so the sm
 
 Local development may use SQLite when `DATABASE_URL` is absent. SQLite is fast for ordinary model, form, permission, and view tests, but it does not prove PostgreSQL row-lock ordering or blocking behavior.
 
-GitHub Actions runs PostgreSQL 17 with empty test-only credentials and sets `DATABASE_URL` for clean migrations, Django checks, deployment checks, and the full pytest suite. Treat the PostgreSQL CI run as authoritative for subscription locking, billing-period concurrency, and wallet-ledger concurrency behavior.
+GitHub Actions runs PostgreSQL 17 with empty test-only credentials and sets `DATABASE_URL` for clean migrations, Django checks, deployment checks, and the full pytest suite. Treat the PostgreSQL CI run as authoritative for subscription locking, billing-period concurrency, wallet-ledger concurrency, and competing Wallet-funded charge behavior.
 
 To run the same profile locally, start PostgreSQL and set a test database URL before invoking Django commands:
 

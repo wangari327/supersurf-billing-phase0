@@ -105,11 +105,26 @@
 - [x] Tests.
 - [x] Stop for approval.
 
+## Phase 7: Wallet-Funded Activation And Renewal Charges
+
+- [x] Immutable billing-charge model.
+- [x] Billing-charge ledger entry type.
+- [x] Wallet-funded activation workflow.
+- [x] Wallet-funded renewal workflow.
+- [x] Exact active subscription snapshot pricing.
+- [x] Sufficient-balance enforcement with overpayment left as Wallet credit.
+- [x] Operation ID idempotency and stale-form checks.
+- [x] Billing-charge permissions.
+- [x] Manual uncharged UI labeling.
+- [x] PostgreSQL concurrency tests.
+- [x] Tests.
+- [x] Stop for approval.
+
 ## Future Phase: Billing And Payments
 
-- [ ] Billing charges.
 - [ ] Invoices.
-- [ ] Renewal charges.
+- [ ] Receipts.
+- [ ] Payment recording.
 - [ ] Renewal engine.
 - [ ] Expiry and suspension automation.
 - [ ] Reports.

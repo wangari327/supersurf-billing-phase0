@@ -33,6 +33,16 @@ urlpatterns = [
         name="billing_period_renew",
     ),
     path(
+        "services/<uuid:service_pk>/wallet-funded/activate/",
+        views.wallet_funded_activate,
+        name="wallet_funded_activate",
+    ),
+    path(
+        "services/<uuid:service_pk>/wallet-funded/renew/",
+        views.wallet_funded_renew,
+        name="wallet_funded_renew",
+    ),
+    path(
         "services/<uuid:service_pk>/billing-periods/",
         views.billing_period_history,
         name="billing_period_history",

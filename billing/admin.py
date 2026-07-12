@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from .models import BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
+from .models import BillingCharge, BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
 
 
 @admin.register(Plan)
@@ -66,6 +66,37 @@ class BillingPeriodAdmin(admin.ModelAdmin):
     list_filter = ("period_type", "currency")
     search_fields = ("service__service_reference", "plan_name")
     readonly_fields = [field.name for field in BillingPeriod._meta.fields]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+
+@admin.register(BillingCharge)
+class BillingChargeAdmin(admin.ModelAdmin):
+    list_display = (
+        "service",
+        "charge_type",
+        "amount_minor",
+        "currency",
+        "billing_period",
+        "ledger_entry",
+        "created_by",
+        "created_at",
+    )
+    list_filter = ("charge_type", "currency")
+    search_fields = ("service__service_reference", "reason")
+    readonly_fields = [field.name for field in BillingCharge._meta.fields]
 
     def has_add_permission(self, request) -> bool:
         return False

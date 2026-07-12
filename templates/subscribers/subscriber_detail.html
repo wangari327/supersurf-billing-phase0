@@ -178,6 +178,13 @@
                           {% endif %}
                           <p class="font-medium">{{ row.latest_period.plan_name }}</p>
                           <p>{{ row.latest_period.formatted_price }}</p>
+                          {% if can_view_charge_details %}
+                            {% if row.latest_period_is_wallet_funded %}
+                              <p><span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Wallet funded</span></p>
+                            {% else %}
+                              <p><span class="badge bg-slate-50 text-slate-700 ring-slate-300">Manual uncharged</span></p>
+                            {% endif %}
+                          {% endif %}
                           <p class="text-slate-600">Start {{ row.latest_period.starts_at|date:"Y-m-d H:i" }}</p>
                           <p class="text-slate-600">Expiry {{ row.latest_period.expires_at|date:"Y-m-d H:i" }}</p>
                           <p class="text-slate-600">Grace until {{ row.latest_period.grace_until|date:"Y-m-d H:i" }}</p>
@@ -261,6 +268,42 @@
                     {% endif %}
                     {% if can_view_billing_periods %}
                       <div class="mt-3 space-y-3">
+                        {% if can_view_charge_details and current %}
+                          <div class="rounded-md border border-slate-200 p-3">
+                            <p class="font-medium">Wallet-funded service time</p>
+                            <p class="text-sm text-slate-600">Wallet balance {{ row.wallet_balance_display }}</p>
+                            <p class="text-sm text-slate-600">Active package price {{ row.current_price_display }}</p>
+                            <p class="text-sm text-slate-600">Amount required {{ row.current_price_display }}</p>
+                            {% if row.wallet_has_sufficient_credit %}
+                              <p class="text-sm text-slate-600">Remaining balance after charge {{ row.remaining_balance_display }}</p>
+                            {% elif row.wallet_exists %}
+                              <p class="text-sm text-amber-900">Wallet balance is insufficient for this package.</p>
+                            {% else %}
+                              <p class="text-sm text-amber-900">No Wallet exists for this subscriber.</p>
+                            {% endif %}
+                            {% if can_wallet_fund_period and row.wallet_has_sufficient_credit %}
+                              {% if row.latest_period %}
+                                <form method="post" action="{% url 'wallet_funded_renew' service.pk %}" class="mt-3 space-y-2">
+                                  {% csrf_token %}
+                                  <input type="hidden" name="operation_id" value="{{ row.wallet_renewal_operation_id }}">
+                                  <input type="hidden" name="expected_previous_period_id" value="{{ row.expected_previous_period_id }}">
+                                  <label class="label" for="wallet_renew_reason_{{ service.pk }}">Reason</label>
+                                  <textarea id="wallet_renew_reason_{{ service.pk }}" class="field" name="reason" rows="2" maxlength="240" required></textarea>
+                                  <button class="btn btn-primary" type="submit">Renew from Wallet</button>
+                                </form>
+                              {% else %}
+                                <form method="post" action="{% url 'wallet_funded_activate' service.pk %}" class="mt-3 space-y-2">
+                                  {% csrf_token %}
+                                  <input type="hidden" name="operation_id" value="{{ row.wallet_activation_operation_id }}">
+                                  <input type="hidden" name="expected_previous_period_id" value="">
+                                  <label class="label" for="wallet_activate_reason_{{ service.pk }}">Reason</label>
+                                  <textarea id="wallet_activate_reason_{{ service.pk }}" class="field" name="reason" rows="2" maxlength="240" required></textarea>
+                                  <button class="btn btn-primary" type="submit">Activate from Wallet</button>
+                                </form>
+                              {% endif %}
+                            {% endif %}
+                          </div>
+                        {% endif %}
                         {% if can_add_billing_period %}
                           {% if current %}
                             {% if row.latest_period %}
@@ -270,7 +313,8 @@
                                 <input type="hidden" name="expected_previous_period_id" value="{{ row.expected_previous_period_id }}">
                                 <label class="label" for="renew_reason_{{ service.pk }}">Reason</label>
                                 <textarea id="renew_reason_{{ service.pk }}" class="field" name="reason" rows="2" required></textarea>
-                                <button class="btn btn-primary" type="submit">Renew service</button>
+                                <p class="text-sm text-amber-900">Manual uncharged periods do not deduct Wallet credit and do not confirm payment.</p>
+                                <button class="btn" type="submit">Manual uncharged renewal</button>
                               </form>
                             {% else %}
                               <form method="post" action="{% url 'billing_period_activate' service.pk %}" class="space-y-2">
@@ -279,7 +323,8 @@
                                 <input type="hidden" name="expected_previous_period_id" value="">
                                 <label class="label" for="activate_reason_{{ service.pk }}">Reason</label>
                                 <textarea id="activate_reason_{{ service.pk }}" class="field" name="reason" rows="2" required></textarea>
-                                <button class="btn btn-primary" type="submit">Activate billing period</button>
+                                <p class="text-sm text-amber-900">Manual uncharged periods do not deduct Wallet credit and do not confirm payment.</p>
+                                <button class="btn" type="submit">Manual uncharged activation</button>
                               </form>
                             {% endif %}
                           {% else %}

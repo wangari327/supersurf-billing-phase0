@@ -64,6 +64,7 @@
           <tr>
             <th class="px-4 py-3 text-left">Sequence</th>
             <th class="px-4 py-3 text-left">Type</th>
+            <th class="px-4 py-3 text-left">Service</th>
             <th class="px-4 py-3 text-left">Direction</th>
             <th class="px-4 py-3 text-left">Amount</th>
             <th class="px-4 py-3 text-left">Balance</th>
@@ -79,6 +80,7 @@
               <tr>
                 <td class="px-4 py-3 font-medium">{{ entry.sequence_number }}</td>
                 <td class="px-4 py-3">{{ entry.get_entry_type_display }}</td>
+                <td class="px-4 py-3">{{ row.service_reference|default:"-" }}</td>
                 <td class="px-4 py-3">{{ entry.get_direction_display }}</td>
                 <td class="px-4 py-3">{{ entry.formatted_amount }}</td>
                 <td class="px-4 py-3">{{ entry.formatted_balance_after }}</td>
@@ -86,9 +88,9 @@
                 <td class="px-4 py-3">{{ entry.created_by.username }}</td>
                 <td class="px-4 py-3">{{ entry.created_at|date:"Y-m-d H:i" }}</td>
                 <td class="px-4 py-3">
-                  {% if entry.entry_type == "reversal" %}
+                  {% if row.is_reversal %}
                     <span class="text-slate-600">Reversal of #{{ entry.reverses_entry.sequence_number }}</span>
-                  {% elif entry.is_reversible %}
+                  {% elif row.is_reversible %}
                     {% if can_add_ledger_entry %}
                       <form method="post" action="{% url 'ledger_entry_reverse' entry.pk %}" class="space-y-2">
                         {% csrf_token %}
@@ -100,8 +102,10 @@
                     {% else %}
                       <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Eligible</span>
                     {% endif %}
-                  {% else %}
+                  {% elif row.is_reversed %}
                     <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Reversed</span>
+                  {% else %}
+                    <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Not reversible</span>
                   {% endif %}
                 </td>
               </tr>

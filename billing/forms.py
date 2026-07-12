@@ -125,6 +125,7 @@ class BillingPeriodActionForm(forms.Form):
     reason = forms.CharField(
         label="Reason",
         required=True,
+        max_length=240,
         widget=forms.Textarea(attrs={"class": "field", "rows": 2}),
     )
 

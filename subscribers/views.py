@@ -11,7 +11,7 @@ from django.db.models import Count, Q
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 
-from billing.models import BillingPeriod, Plan, Subscription, Wallet
+from billing.models import BillingCharge, BillingPeriod, Plan, Subscription, Wallet
 from billing.money import format_ksh
 from billing.services import billing_state_for_service
 
@@ -101,6 +101,9 @@ def subscriber_detail(request, pk):
     can_view_wallet = request.user.has_perm("billing.view_wallet") and request.user.has_perm(
         "billing.view_ledgerentry"
     )
+    can_view_charge_details = can_view_wallet and request.user.has_perm(
+        "billing.view_billingcharge"
+    )
     can_add_service = request.user.has_perm("subscribers.add_service")
     can_change_service = request.user.has_perm("subscribers.change_service")
     can_assign_subscription = can_view_services and request.user.has_perm(
@@ -112,17 +115,25 @@ def subscriber_detail(request, pk):
     can_add_billing_period = can_view_subscriptions and request.user.has_perm(
         "billing.add_billingperiod"
     )
+    can_wallet_fund_period = (
+        can_view_charge_details
+        and can_add_billing_period
+        and request.user.has_perm("billing.add_ledgerentry")
+        and request.user.has_perm("billing.add_billingcharge")
+    )
     subscribers = Subscriber.objects.all()
     if can_view_services:
         subscribers = subscribers.prefetch_related("services")
     subscriber = get_object_or_404(subscribers, pk=pk)
     wallet = None
     wallet_latest_entry = None
+    wallet_balance_minor = 0
     wallet_balance_display = format_ksh(0)
     if can_view_wallet:
         wallet = Wallet.objects.filter(subscriber=subscriber).first()
         if wallet is not None:
             wallet_latest_entry = wallet.entries.order_by("-sequence_number").first()
+            wallet_balance_minor = wallet.balance_minor
             wallet_balance_display = wallet.formatted_balance
     service_rows = []
     active_plans = []
@@ -161,6 +172,22 @@ def subscriber_detail(request, pk):
                 )
                 billing_state = billing_state_for_service(service)
                 billing_history_count = BillingPeriod.objects.filter(service=service).count()
+            current_price_minor = current_subscription.price_minor if current_subscription else None
+            remaining_balance_minor = (
+                wallet_balance_minor - current_price_minor
+                if current_price_minor is not None
+                else None
+            )
+            wallet_has_sufficient_credit = (
+                wallet is not None
+                and current_price_minor is not None
+                and wallet_balance_minor >= current_price_minor
+            )
+            latest_period_is_wallet_funded = (
+                latest_period is not None
+                and can_view_charge_details
+                and BillingCharge.objects.filter(billing_period=latest_period).exists()
+            )
             service_rows.append(
                 {
                     "service": service,
@@ -171,9 +198,21 @@ def subscriber_detail(request, pk):
                     "billing_history_count": billing_history_count,
                     "activation_operation_id": uuid.uuid4(),
                     "renewal_operation_id": uuid.uuid4(),
+                    "wallet_activation_operation_id": uuid.uuid4(),
+                    "wallet_renewal_operation_id": uuid.uuid4(),
                     "expected_previous_period_id": str(latest_period.pk)
                     if latest_period
                     else "",
+                    "wallet_exists": wallet is not None,
+                    "wallet_balance_display": wallet_balance_display,
+                    "current_price_display": current_subscription.formatted_price
+                    if current_subscription
+                    else "",
+                    "remaining_balance_display": format_ksh(remaining_balance_minor)
+                    if remaining_balance_minor is not None and remaining_balance_minor >= 0
+                    else "",
+                    "wallet_has_sufficient_credit": wallet_has_sufficient_credit,
+                    "latest_period_is_wallet_funded": latest_period_is_wallet_funded,
                 }
             )
     return render(
@@ -190,6 +229,8 @@ def subscriber_detail(request, pk):
             "can_view_billing_periods": can_view_billing_periods,
             "can_add_billing_period": can_add_billing_period,
             "can_view_wallet": can_view_wallet,
+            "can_view_charge_details": can_view_charge_details,
+            "can_wallet_fund_period": can_wallet_fund_period,
             "wallet": wallet,
             "wallet_latest_entry": wallet_latest_entry,
             "wallet_balance_display": wallet_balance_display,

@@ -17,9 +17,10 @@ from .forms import (
     SubscriptionPackageForm,
     WalletAdjustmentForm,
 )
-from .models import BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
+from .models import BillingCharge, BillingPeriod, LedgerEntry, Plan, Subscription, Wallet
 from .services import (
     activate_billing_period,
+    activate_service_from_wallet,
     assign_package,
     billing_state_for_service,
     change_subscription_package,
@@ -27,6 +28,7 @@ from .services import (
     end_subscription,
     post_manual_wallet_adjustment,
     renew_billing_period,
+    renew_service_from_wallet,
     reverse_ledger_entry,
     set_package_active,
     update_package,
@@ -307,6 +309,80 @@ def billing_period_renew(request, service_pk):
 
 
 @login_required
+@permission_required("subscribers.view_subscriber", raise_exception=True)
+@permission_required("subscribers.view_service", raise_exception=True)
+@permission_required("billing.view_subscription", raise_exception=True)
+@permission_required("billing.view_billingperiod", raise_exception=True)
+@permission_required("billing.add_billingperiod", raise_exception=True)
+@permission_required("billing.view_wallet", raise_exception=True)
+@permission_required("billing.view_ledgerentry", raise_exception=True)
+@permission_required("billing.add_ledgerentry", raise_exception=True)
+@permission_required("billing.view_billingcharge", raise_exception=True)
+@permission_required("billing.add_billingcharge", raise_exception=True)
+def wallet_funded_activate(request, service_pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    service = get_object_or_404(Service.objects.select_related("subscriber"), pk=service_pk)
+    form = BillingPeriodActionForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("subscriber_detail", pk=service.subscriber_id)
+    try:
+        activate_service_from_wallet(
+            service=service,
+            operation_id=form.cleaned_data["operation_id"],
+            expected_previous_period_id=form.cleaned_data["expected_previous_period_id"],
+            reason=form.cleaned_data["reason"],
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Service activated from Wallet.")
+    return redirect("subscriber_detail", pk=service.subscriber_id)
+
+
+@login_required
+@permission_required("subscribers.view_subscriber", raise_exception=True)
+@permission_required("subscribers.view_service", raise_exception=True)
+@permission_required("billing.view_subscription", raise_exception=True)
+@permission_required("billing.view_billingperiod", raise_exception=True)
+@permission_required("billing.add_billingperiod", raise_exception=True)
+@permission_required("billing.view_wallet", raise_exception=True)
+@permission_required("billing.view_ledgerentry", raise_exception=True)
+@permission_required("billing.add_ledgerentry", raise_exception=True)
+@permission_required("billing.view_billingcharge", raise_exception=True)
+@permission_required("billing.add_billingcharge", raise_exception=True)
+def wallet_funded_renew(request, service_pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    service = get_object_or_404(Service.objects.select_related("subscriber"), pk=service_pk)
+    form = BillingPeriodActionForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("subscriber_detail", pk=service.subscriber_id)
+    try:
+        renew_service_from_wallet(
+            service=service,
+            operation_id=form.cleaned_data["operation_id"],
+            expected_previous_period_id=form.cleaned_data["expected_previous_period_id"],
+            reason=form.cleaned_data["reason"],
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Service renewed from Wallet.")
+    return redirect("subscriber_detail", pk=service.subscriber_id)
+
+
+@login_required
 @permission_required("subscribers.view_service", raise_exception=True)
 @permission_required("billing.view_subscription", raise_exception=True)
 @permission_required("billing.view_billingperiod", raise_exception=True)
@@ -320,10 +396,31 @@ def billing_period_history(request, service_pk):
     paginator = Paginator(periods, 20)
     page = paginator.get_page(request.GET.get("page"))
     current_state = billing_state_for_service(service)
+    can_view_charge_details = (
+        request.user.has_perm("billing.view_wallet")
+        and request.user.has_perm("billing.view_ledgerentry")
+        and request.user.has_perm("billing.view_billingcharge")
+    )
+    charges_by_period = {}
+    if can_view_charge_details:
+        charges_by_period = {
+            charge.billing_period_id: charge
+            for charge in BillingCharge.objects.filter(billing_period__in=page.object_list)
+        }
+    period_rows = [
+        {"period": period, "charge": charges_by_period.get(period.pk)}
+        for period in page.object_list
+    ]
     return render(
         request,
         "billing/billing_period_history.html",
-        {"service": service, "page": page, "current_state": current_state},
+        {
+            "service": service,
+            "page": page,
+            "period_rows": period_rows,
+            "current_state": current_state,
+            "can_view_charge_details": can_view_charge_details,
+        },
     )
 
 
@@ -339,17 +436,37 @@ def wallet_detail(request, subscriber_pk):
     balance_display = "KSh 0"
     if wallet is not None:
         entries = (
-            wallet.entries.select_related("created_by", "reverses_entry")
+            wallet.entries.select_related(
+                "created_by",
+                "reverses_entry",
+                "billing_charge",
+                "billing_charge__service",
+            )
             .order_by("-sequence_number")
         )
         latest_entry = entries.first()
         balance_display = wallet.formatted_balance
     paginator = Paginator(entries, 20)
     page = paginator.get_page(request.GET.get("page"))
-    entry_rows = [
-        {"entry": entry, "reversal_form": LedgerReversalForm()}
-        for entry in page.object_list
-    ]
+    can_view_service_references = request.user.has_perm("subscribers.view_service")
+    entry_rows = []
+    for entry in page.object_list:
+        service_reference = ""
+        if can_view_service_references and entry.entry_type == LedgerEntry.ENTRY_BILLING_CHARGE:
+            try:
+                service_reference = entry.billing_charge.service.service_reference
+            except BillingCharge.DoesNotExist:
+                service_reference = ""
+        entry_rows.append(
+            {
+                "entry": entry,
+                "reversal_form": LedgerReversalForm(),
+                "service_reference": service_reference,
+                "is_reversal": entry.entry_type == LedgerEntry.ENTRY_REVERSAL,
+                "is_reversible": entry.is_reversible,
+                "is_reversed": LedgerEntry.objects.filter(reverses_entry=entry).exists(),
+            }
+        )
     can_add_ledger_entry = request.user.has_perm("billing.add_ledgerentry")
     credit_form = WalletAdjustmentForm(
         initial={"direction": LedgerEntry.DIRECTION_CREDIT},

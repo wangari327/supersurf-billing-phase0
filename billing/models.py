@@ -659,10 +659,12 @@ class LedgerEntryManager(models.Manager):
 class LedgerEntry(models.Model):
     ENTRY_MANUAL_CREDIT = "manual_credit"
     ENTRY_MANUAL_DEBIT = "manual_debit"
+    ENTRY_BILLING_CHARGE = "billing_charge"
     ENTRY_REVERSAL = "reversal"
     ENTRY_TYPE_CHOICES = [
         (ENTRY_MANUAL_CREDIT, "Manual credit"),
         (ENTRY_MANUAL_DEBIT, "Manual debit"),
+        (ENTRY_BILLING_CHARGE, "Billing charge"),
         (ENTRY_REVERSAL, "Reversal"),
     ]
     DIRECTION_CREDIT = "credit"
@@ -768,12 +770,28 @@ class LedgerEntry(models.Model):
                 name="ledger_entry_currency_kes",
             ),
             models.CheckConstraint(
-                condition=Q(entry_type__in=["manual_credit", "manual_debit", "reversal"]),
+                condition=Q(
+                    entry_type__in=[
+                        "manual_credit",
+                        "manual_debit",
+                        "billing_charge",
+                        "reversal",
+                    ]
+                ),
                 name="ledger_entry_type_valid",
             ),
             models.CheckConstraint(
                 condition=Q(direction__in=["credit", "debit"]),
                 name="ledger_entry_direction_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(entry_type="manual_credit", direction="credit")
+                    | Q(entry_type="manual_debit", direction="debit")
+                    | Q(entry_type="billing_charge", direction="debit")
+                    | Q(entry_type="reversal")
+                ),
+                name="ledger_entry_type_direction_valid",
             ),
             models.CheckConstraint(
                 condition=(
@@ -785,7 +803,7 @@ class LedgerEntry(models.Model):
             models.CheckConstraint(
                 condition=(
                     Q(
-                        entry_type__in=["manual_credit", "manual_debit"],
+                        entry_type__in=["manual_credit", "manual_debit", "billing_charge"],
                         reverses_entry__isnull=True,
                     )
                     | Q(entry_type="reversal", reverses_entry__isnull=False)
@@ -810,6 +828,7 @@ class LedgerEntry(models.Model):
         if self.entry_type not in {
             self.ENTRY_MANUAL_CREDIT,
             self.ENTRY_MANUAL_DEBIT,
+            self.ENTRY_BILLING_CHARGE,
             self.ENTRY_REVERSAL,
         }:
             raise ValidationError({"entry_type": "Ledger entry type is not valid."})
@@ -852,10 +871,24 @@ class LedgerEntry(models.Model):
         elif self.sequence_number and self.sequence_number > 1:
             raise ValidationError({"previous_entry": "Ledger entry requires a previous entry."})
 
-        if self.entry_type in {self.ENTRY_MANUAL_CREDIT, self.ENTRY_MANUAL_DEBIT}:
+        if self.entry_type == self.ENTRY_MANUAL_CREDIT and self.direction != self.DIRECTION_CREDIT:
+            raise ValidationError({"direction": "Manual credits must use credit direction."})
+        if self.entry_type == self.ENTRY_MANUAL_DEBIT and self.direction != self.DIRECTION_DEBIT:
+            raise ValidationError({"direction": "Manual debits must use debit direction."})
+        if (
+            self.entry_type == self.ENTRY_BILLING_CHARGE
+            and self.direction != self.DIRECTION_DEBIT
+        ):
+            raise ValidationError({"direction": "Billing charge entries must use debit direction."})
+
+        if self.entry_type in {
+            self.ENTRY_MANUAL_CREDIT,
+            self.ENTRY_MANUAL_DEBIT,
+            self.ENTRY_BILLING_CHARGE,
+        }:
             if self.reverses_entry_id:
                 raise ValidationError(
-                    {"reverses_entry": "Manual entries cannot reverse another entry."}
+                    {"reverses_entry": "This ledger entry type cannot reverse another entry."}
                 )
         elif self.entry_type == self.ENTRY_REVERSAL:
             self._clean_reversal_target()
@@ -944,3 +977,259 @@ class LedgerEntry(models.Model):
         if changed:
             names = ", ".join(sorted(changed))
             raise RuntimeError(f"LedgerEntry fields cannot be changed after creation: {names}.")
+
+
+class BillingChargeQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "BillingCharge records cannot be updated through application code."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "BillingCharge records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "BillingCharge records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+
+class BillingChargeManager(models.Manager):
+    def get_queryset(self):
+        return BillingChargeQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "BillingCharge records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class BillingCharge(models.Model):
+    CHARGE_ACTIVATION = "activation"
+    CHARGE_RENEWAL = "renewal"
+    CHARGE_TYPE_CHOICES = [
+        (CHARGE_ACTIVATION, "Activation"),
+        (CHARGE_RENEWAL, "Renewal"),
+    ]
+    IMMUTABLE_FIELDS = (
+        "service_id",
+        "subscription_id",
+        "billing_period_id",
+        "wallet_id",
+        "ledger_entry_id",
+        "operation_id",
+        "charge_type",
+        "amount_minor",
+        "currency",
+        "reason",
+        "created_by_id",
+        "created_at",
+    )
+    IMMUTABLE_UPDATE_FIELDS = frozenset(IMMUTABLE_FIELDS) | {
+        "service",
+        "subscription",
+        "billing_period",
+        "wallet",
+        "ledger_entry",
+        "created_by",
+    }
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.ForeignKey(
+        "subscribers.Service",
+        on_delete=models.PROTECT,
+        related_name="billing_charges",
+    )
+    subscription = models.ForeignKey(
+        Subscription,
+        on_delete=models.PROTECT,
+        related_name="billing_charges",
+    )
+    billing_period = models.OneToOneField(
+        BillingPeriod,
+        on_delete=models.PROTECT,
+        related_name="billing_charge",
+    )
+    wallet = models.ForeignKey(Wallet, on_delete=models.PROTECT, related_name="billing_charges")
+    ledger_entry = models.OneToOneField(
+        LedgerEntry,
+        on_delete=models.PROTECT,
+        related_name="billing_charge",
+    )
+    operation_id = models.UUIDField(unique=True, editable=False)
+    charge_type = models.CharField(max_length=12, choices=CHARGE_TYPE_CHOICES)
+    amount_minor = models.PositiveIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_MONEY_MINOR)]
+    )
+    currency = models.CharField(max_length=3, default="KES", editable=False)
+    reason = models.CharField(max_length=240)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_billing_charges",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = BillingChargeManager()
+
+    class Meta:
+        verbose_name = "Billing charge"
+        verbose_name_plural = "Billing charges"
+        ordering = ["service", "-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["service", "charge_type"], name="bill_charge_service_type_idx"),
+            models.Index(fields=["wallet", "created_at"], name="bill_charge_wallet_created_idx"),
+            models.Index(fields=["operation_id"], name="billing_charge_operation_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(amount_minor__gt=0),
+                name="billing_charge_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(currency="KES"),
+                name="billing_charge_currency_kes",
+            ),
+            models.CheckConstraint(
+                condition=Q(charge_type__in=["activation", "renewal"]),
+                name="billing_charge_type_valid",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.service} {self.charge_type} charge"
+
+    def save(self, *args, **kwargs) -> None:
+        self._reject_protected_changes(update_fields=kwargs.get("update_fields"))
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        self.reason = self.reason.strip()
+        if not self.reason:
+            raise ValidationError({"reason": "Reason is required."})
+        if self.charge_type not in {self.CHARGE_ACTIVATION, self.CHARGE_RENEWAL}:
+            raise ValidationError({"charge_type": "Billing charge type is not valid."})
+        if self.currency != "KES":
+            raise ValidationError({"currency": "Billing charge currency must be KES."})
+        if self.amount_minor is not None and self.amount_minor <= 0:
+            raise ValidationError({"amount_minor": "Charge amount must be greater than zero."})
+        if self.amount_minor is not None and self.amount_minor > MAX_MONEY_MINOR:
+            raise ValidationError({"amount_minor": "Charge amount is too large."})
+
+        if (
+            self.service_id
+            and self.subscription_id
+            and self.subscription.service_id != self.service_id
+        ):
+            raise ValidationError({"subscription": "Subscription must belong to this service."})
+        if (
+            self.service_id
+            and self.billing_period_id
+            and self.billing_period.service_id != self.service_id
+        ):
+            raise ValidationError({"billing_period": "Billing period must belong to this service."})
+        if (
+            self.subscription_id
+            and self.billing_period_id
+            and self.billing_period.subscription_id != self.subscription_id
+        ):
+            raise ValidationError(
+                {"billing_period": "Billing period must use this subscription."}
+            )
+        if (
+            self.service_id
+            and self.wallet_id
+            and self.wallet.subscriber_id != self.service.subscriber_id
+        ):
+            raise ValidationError({"wallet": "Wallet must belong to this service subscriber."})
+        if (
+            self.wallet_id
+            and self.ledger_entry_id
+            and self.ledger_entry.wallet_id != self.wallet_id
+        ):
+            raise ValidationError({"ledger_entry": "Ledger entry must belong to this wallet."})
+        if self.ledger_entry_id:
+            if self.ledger_entry.entry_type != LedgerEntry.ENTRY_BILLING_CHARGE:
+                raise ValidationError({"ledger_entry": "Ledger entry must be a billing charge."})
+            if self.ledger_entry.direction != LedgerEntry.DIRECTION_DEBIT:
+                raise ValidationError({"ledger_entry": "Billing charge ledger entry must debit."})
+            if (
+                self.amount_minor is not None
+                and self.ledger_entry.amount_minor != self.amount_minor
+            ):
+                raise ValidationError(
+                    {"amount_minor": "Ledger entry amount must match the charge amount."}
+                )
+            if self.ledger_entry.currency != self.currency:
+                raise ValidationError(
+                    {"currency": "Ledger entry currency must match the charge currency."}
+                )
+            if self.ledger_entry.operation_id != self.operation_id:
+                raise ValidationError(
+                    {"operation_id": "Ledger entry operation ID must match the charge."}
+                )
+            if self.created_by_id and self.ledger_entry.created_by_id != self.created_by_id:
+                raise ValidationError(
+                    {"created_by": "Ledger entry operator must match the charge operator."}
+                )
+        if self.billing_period_id:
+            if (
+                self.amount_minor is not None
+                and self.billing_period.price_minor != self.amount_minor
+            ):
+                raise ValidationError(
+                    {"amount_minor": "Billing period price must match the charge amount."}
+                )
+            if self.billing_period.operation_id != self.operation_id:
+                raise ValidationError(
+                    {"operation_id": "Billing period operation ID must match the charge."}
+                )
+            if (
+                self.charge_type == self.CHARGE_ACTIVATION
+                and self.billing_period.period_type != BillingPeriod.PERIOD_ACTIVATION
+            ):
+                raise ValidationError(
+                    {"charge_type": "Activation charge requires an activation period."}
+                )
+            if (
+                self.charge_type == self.CHARGE_RENEWAL
+                and self.billing_period.period_type != BillingPeriod.PERIOD_RENEWAL
+            ):
+                raise ValidationError(
+                    {"charge_type": "Renewal charge requires a renewal period."}
+                )
+
+    def delete(self, *args, **kwargs) -> None:
+        msg = "BillingCharge records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    @property
+    def formatted_amount(self) -> str:
+        return format_ksh(self.amount_minor)
+
+    def _reject_protected_changes(self, update_fields=None) -> None:
+        if not self.pk:
+            return
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(
+                self.IMMUTABLE_UPDATE_FIELDS
+            )
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(
+                    f"BillingCharge fields cannot be changed after creation: {names}."
+                )
+        try:
+            current = type(self).objects.get(pk=self.pk)
+        except type(self).DoesNotExist:
+            return
+        changed = [
+            field
+            for field in self.IMMUTABLE_FIELDS
+            if getattr(current, field) != getattr(self, field)
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(
+                f"BillingCharge fields cannot be changed after creation: {names}."
+            )

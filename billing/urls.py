@@ -22,4 +22,19 @@ urlpatterns = [
         name="subscription_change_package",
     ),
     path("subscriptions/<uuid:pk>/end/", views.subscription_end, name="subscription_end"),
+    path(
+        "services/<uuid:service_pk>/billing-periods/activate/",
+        views.billing_period_activate,
+        name="billing_period_activate",
+    ),
+    path(
+        "services/<uuid:service_pk>/billing-periods/renew/",
+        views.billing_period_renew,
+        name="billing_period_renew",
+    ),
+    path(
+        "services/<uuid:service_pk>/billing-periods/",
+        views.billing_period_history,
+        name="billing_period_history",
+    ),
 ]

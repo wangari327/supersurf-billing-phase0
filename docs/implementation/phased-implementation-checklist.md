@@ -76,7 +76,22 @@
 - [x] Tests.
 - [x] Stop for approval.
 
-## Future Phase: Billing And Renewals
+## Phase 5: Billing Periods And Manual Renewals
+
+- [x] Billing period model.
+- [x] Immutable subscription snapshots on each period.
+- [x] Manual activation.
+- [x] Manual renewal.
+- [x] Early, grace, late, and zero-hour grace date rules.
+- [x] Derived billing state.
+- [x] Operation ID idempotency and stale-form checks.
+- [x] Billing-period permissions.
+- [x] Paginated period history.
+- [x] PostgreSQL concurrency tests.
+- [x] Tests.
+- [x] Stop for approval.
+
+## Future Phase: Billing And Payments
 
 - [ ] Billing charges.
 - [ ] Wallet.

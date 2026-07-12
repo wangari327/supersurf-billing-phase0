@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
@@ -10,7 +11,8 @@ from django.db.models import Count, Q
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 
-from billing.models import Plan, Subscription
+from billing.models import BillingPeriod, Plan, Subscription
+from billing.services import billing_state_for_service
 
 from .forms import ServiceForm, SubscriberForm, SubscriberSearchForm
 from .models import Service, Subscriber
@@ -92,6 +94,9 @@ def subscriber_detail(request, pk):
     can_view_subscriptions = can_view_services and request.user.has_perm(
         "billing.view_subscription"
     )
+    can_view_billing_periods = (
+        can_view_subscriptions and request.user.has_perm("billing.view_billingperiod")
+    )
     can_add_service = request.user.has_perm("subscribers.add_service")
     can_change_service = request.user.has_perm("subscribers.change_service")
     can_assign_subscription = can_view_services and request.user.has_perm(
@@ -99,6 +104,9 @@ def subscriber_detail(request, pk):
     )
     can_change_subscription = can_view_services and request.user.has_perm(
         "billing.change_subscription"
+    )
+    can_add_billing_period = can_view_subscriptions and request.user.has_perm(
+        "billing.add_billingperiod"
     )
     subscribers = Subscriber.objects.all()
     if can_view_services:
@@ -118,6 +126,9 @@ def subscriber_detail(request, pk):
         for service in subscriber.services.all():
             history = []
             current_subscription = None
+            billing_state = ""
+            latest_period = None
+            billing_history_count = 0
             if can_view_subscriptions:
                 history = list(
                     service.subscriptions.select_related("plan").order_by("-created_at", "-id")
@@ -130,11 +141,27 @@ def subscriber_detail(request, pk):
                     ),
                     None,
                 )
+            if can_view_billing_periods:
+                latest_period = (
+                    service.billing_periods.select_related("subscription")
+                    .order_by("-sequence_number")
+                    .first()
+                )
+                billing_state = billing_state_for_service(service)
+                billing_history_count = BillingPeriod.objects.filter(service=service).count()
             service_rows.append(
                 {
                     "service": service,
                     "history": history,
                     "current_subscription": current_subscription,
+                    "billing_state": billing_state,
+                    "latest_period": latest_period,
+                    "billing_history_count": billing_history_count,
+                    "activation_operation_id": uuid.uuid4(),
+                    "renewal_operation_id": uuid.uuid4(),
+                    "expected_previous_period_id": str(latest_period.pk)
+                    if latest_period
+                    else "",
                 }
             )
     return render(
@@ -148,6 +175,8 @@ def subscriber_detail(request, pk):
             "can_change_service": can_change_service,
             "can_assign_subscription": can_assign_subscription,
             "can_change_subscription": can_change_subscription,
+            "can_view_billing_periods": can_view_billing_periods,
+            "can_add_billing_period": can_add_billing_period,
             "service_rows": service_rows,
             "service_count": len(service_rows),
             "active_plans": active_plans,

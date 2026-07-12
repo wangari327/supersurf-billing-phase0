@@ -23,7 +23,10 @@ uv run python manage.py migrate
 
 @'
 import tempfile
+import os
 from pathlib import Path
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "supersurf.settings")
 
 from django.conf import settings
 from django.core.management import call_command
@@ -34,6 +37,27 @@ settings.DATABASES["default"]["NAME"] = tmp
 import django
 
 django.setup()
+call_command("migrate", verbosity=0)
+print(tmp)
+'@ | uv run python -
+
+@'
+import tempfile
+import os
+from pathlib import Path
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "supersurf.settings")
+
+from django.conf import settings
+from django.core.management import call_command
+
+tmp = Path(tempfile.mkdtemp()) / "phase4.sqlite3"
+settings.DATABASES["default"]["NAME"] = tmp
+
+import django
+
+django.setup()
+call_command("migrate", "billing", "0003", verbosity=0)
 call_command("migrate", verbosity=0)
 print(tmp)
 '@ | uv run python -
@@ -73,7 +97,7 @@ On the development machine, the Playwright browser download timed out, so the sm
 
 Local development may use SQLite when `DATABASE_URL` is absent. SQLite is fast for ordinary model, form, permission, and view tests, but it does not prove PostgreSQL row-lock ordering or blocking behavior.
 
-GitHub Actions runs PostgreSQL 17 with empty test-only credentials and sets `DATABASE_URL` for clean migrations, Django checks, deployment checks, and the full pytest suite. Treat the PostgreSQL CI run as authoritative for subscription locking behavior.
+GitHub Actions runs PostgreSQL 17 with empty test-only credentials and sets `DATABASE_URL` for clean migrations, Django checks, deployment checks, and the full pytest suite. Treat the PostgreSQL CI run as authoritative for subscription locking and billing-period concurrency behavior.
 
 To run the same profile locally, start PostgreSQL and set a test database URL before invoking Django commands:
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import timedelta
 from uuid import UUID
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -11,7 +12,7 @@ from django.utils import timezone
 from audit.service import record_event
 from subscribers.models import Service
 
-from .models import Plan, Subscription
+from .models import BillingPeriod, Plan, Subscription
 
 AUDITED_FIELDS = [
     "name",
@@ -31,6 +32,13 @@ SUBSCRIPTION_SNAPSHOT_FIELDS = [
     "duration_days",
     "grace_period_hours",
 ]
+BILLING_STATE_UNACTIVATED = "unactivated"
+BILLING_STATE_ACTIVE = "active"
+BILLING_STATE_GRACE = "grace"
+BILLING_STATE_EXPIRED = "expired"
+STALE_BILLING_PERIOD_MESSAGE = (
+    "The billing period changed while this form was open. Refresh and try again."
+)
 
 
 def snapshot(plan: Plan) -> dict[str, object]:
@@ -74,6 +82,27 @@ def _subscription_metadata(subscription: Subscription) -> dict[str, object]:
         "plan_name": subscription.plan_name,
         "price_minor": subscription.price_minor,
         "download_speed_mbps": subscription.download_speed_mbps,
+    }
+
+
+def _billing_period_metadata(period: BillingPeriod, state: str) -> dict[str, object]:
+    return {
+        "service_reference": period.service.service_reference,
+        "subscription_id": str(period.subscription_id),
+        "billing_period_id": str(period.pk),
+        "sequence_number": period.sequence_number,
+        "period_type": period.period_type,
+        "previous_period_id": str(period.previous_period_id) if period.previous_period_id else "",
+        "plan_name": period.plan_name,
+        "download_speed_mbps": period.download_speed_mbps,
+        "price_minor": period.price_minor,
+        "duration_days": period.duration_days,
+        "grace_period_hours": period.grace_period_hours,
+        "effective_timestamp": period.effective_at.isoformat(),
+        "starts_at": period.starts_at.isoformat(),
+        "expires_at": period.expires_at.isoformat(),
+        "grace_until": period.grace_until.isoformat(),
+        "derived_state": state,
     }
 
 
@@ -151,12 +180,198 @@ def _lock_current_active_subscription(service: Service) -> Subscription | None:
     )
 
 
+def _lock_latest_billing_period(service: Service) -> BillingPeriod | None:
+    return (
+        BillingPeriod.objects.select_for_update(of=("self",))
+        .filter(service_id=service.pk)
+        .order_by("-sequence_number")
+        .first()
+    )
+
+
 def _lock_selected_plan(plan: Plan) -> Plan:
     return Plan.objects.select_for_update(of=("self",)).get(pk=plan.pk)
 
 
 def _lookup_subscription_service_id(subscription: Subscription) -> UUID:
     return Subscription.objects.only("service_id").get(pk=subscription.pk).service_id
+
+
+def _normalize_operation_id(operation_id) -> UUID:
+    try:
+        return operation_id if isinstance(operation_id, UUID) else UUID(str(operation_id))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Operation ID is not valid.") from exc
+
+
+def _normalize_expected_previous_period_id(expected_previous_period_id) -> UUID | None:
+    if expected_previous_period_id in {None, ""}:
+        return None
+    try:
+        return (
+            expected_previous_period_id
+            if isinstance(expected_previous_period_id, UUID)
+            else UUID(str(expected_previous_period_id))
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Expected previous billing period is not valid.") from exc
+
+
+def _validate_reason(reason: str) -> str:
+    reason = reason.strip()
+    if not reason:
+        raise ValidationError("Reason is required.")
+    return reason
+
+
+def _validate_aware_timestamp(value, field_name: str):
+    if timezone.is_naive(value):
+        raise ValidationError(f"{field_name} must be timezone-aware.")
+    return value
+
+
+def _period_snapshot_from_subscription(subscription: Subscription) -> dict[str, object]:
+    return {
+        "plan_name": subscription.plan_name,
+        "download_speed_mbps": subscription.download_speed_mbps,
+        "price_minor": subscription.price_minor,
+        "currency": subscription.currency,
+        "duration_days": subscription.duration_days,
+        "grace_period_hours": subscription.grace_period_hours,
+    }
+
+
+def _billing_period_state(latest_period: BillingPeriod | None, at_time) -> str:
+    _validate_aware_timestamp(at_time, "State timestamp")
+    if latest_period is None:
+        return BILLING_STATE_UNACTIVATED
+    if at_time < latest_period.expires_at:
+        return BILLING_STATE_ACTIVE
+    if at_time < latest_period.grace_until:
+        return BILLING_STATE_GRACE
+    return BILLING_STATE_EXPIRED
+
+
+def billing_state_for_service(service: Service, at_time=None) -> str:
+    at_time = at_time or timezone.now()
+    latest_period = (
+        BillingPeriod.objects.filter(service_id=service.pk).order_by("-sequence_number").first()
+    )
+    return _billing_period_state(latest_period, at_time)
+
+
+def _existing_operation_result(
+    *,
+    service: Service,
+    operation_id: UUID,
+    period_type: str,
+    expected_previous_period_id: UUID | None,
+) -> BillingPeriod | None:
+    period = (
+        BillingPeriod.objects.select_related("service", "subscription", "previous_period")
+        .filter(operation_id=operation_id)
+        .first()
+    )
+    if period is None:
+        return None
+    if (
+        period.service_id == service.pk
+        and period.period_type == period_type
+        and period.previous_period_id == expected_previous_period_id
+    ):
+        return period
+    raise ValidationError("Operation ID was already used for a different billing period.")
+
+
+def _is_billing_period_conflict(error: IntegrityError) -> bool:
+    diag = getattr(getattr(error, "__cause__", None), "diag", None)
+    constraint_name = getattr(diag, "constraint_name", "")
+    if constraint_name in {
+        "billing_period_service_sequence_unique",
+        "billing_period_previous_single_successor",
+        "billing_billingperiod_operation_id_key",
+    }:
+        return True
+    message = str(error).lower()
+    return "billing_period" in message and ("unique" in message or "duplicate" in message)
+
+
+def _save_billing_period(period: BillingPeriod) -> BillingPeriod:
+    try:
+        period.save()
+    except IntegrityError as exc:
+        if not _is_billing_period_conflict(exc):
+            raise
+        raise ValidationError(STALE_BILLING_PERIOD_MESSAGE) from exc
+    return period
+
+
+def _assert_billing_period_eligibility(
+    *,
+    service: Service,
+    subscription: Subscription | None,
+    action: str,
+) -> Subscription:
+    if not service.is_active:
+        raise ValidationError(f"Only active services can be {action}.")
+    if not service.subscriber.is_active:
+        raise ValidationError(f"Only active subscribers can be {action}.")
+    if subscription is None:
+        raise ValidationError("A current active subscription is required.")
+    subscription.service = service
+    return subscription
+
+
+def _create_billing_period(
+    *,
+    service: Service,
+    subscription: Subscription,
+    sequence_number: int,
+    period_type: str,
+    operation_id: UUID,
+    previous_period: BillingPeriod | None,
+    effective_at,
+) -> BillingPeriod:
+    if previous_period is None:
+        starts_at = effective_at
+    elif effective_at < previous_period.grace_until:
+        starts_at = previous_period.expires_at
+    else:
+        starts_at = effective_at
+    expires_at = starts_at + timedelta(days=subscription.duration_days)
+    grace_until = expires_at + timedelta(hours=subscription.grace_period_hours)
+    return BillingPeriod(
+        service=service,
+        subscription=subscription,
+        sequence_number=sequence_number,
+        period_type=period_type,
+        operation_id=operation_id,
+        previous_period=previous_period,
+        effective_at=effective_at,
+        starts_at=starts_at,
+        expires_at=expires_at,
+        grace_until=grace_until,
+        **_period_snapshot_from_subscription(subscription),
+    )
+
+
+def _record_billing_period_event(
+    *,
+    action: str,
+    period: BillingPeriod,
+    actor,
+    request: HttpRequest | None,
+    reason: str,
+) -> None:
+    record_event(
+        action=action,
+        actor=actor,
+        request=request,
+        target_type="billing_period",
+        target_identifier=period.pk,
+        metadata=_billing_period_metadata(period, billing_state_for_service(period.service)),
+        reason=reason,
+    )
 
 
 @transaction.atomic
@@ -389,3 +604,145 @@ def end_subscription(
         reason=reason,
     )
     return locked_subscription
+
+
+@transaction.atomic
+def activate_billing_period(
+    *,
+    service: Service,
+    operation_id,
+    expected_previous_period_id,
+    reason: str,
+    actor,
+    request: HttpRequest | None = None,
+    effective_at=None,
+) -> BillingPeriod:
+    _require_permission(actor, "subscribers.view_service", "billing.add_billingperiod")
+    if not actor.has_perm("billing.view_subscription"):
+        raise PermissionDenied("You do not have permission to create billing periods.")
+    reason = _validate_reason(reason)
+    operation_uuid = _normalize_operation_id(operation_id)
+    expected_previous_uuid = _normalize_expected_previous_period_id(expected_previous_period_id)
+    if expected_previous_uuid is not None:
+        raise ValidationError("First activation cannot include a previous billing period.")
+
+    existing = _existing_operation_result(
+        service=service,
+        operation_id=operation_uuid,
+        period_type=BillingPeriod.PERIOD_ACTIVATION,
+        expected_previous_period_id=None,
+    )
+    if existing is not None:
+        return existing
+
+    locked_service = _lock_service_and_subscriber(service)
+    locked_subscription = _assert_billing_period_eligibility(
+        service=locked_service,
+        subscription=_lock_current_active_subscription(locked_service),
+        action="activated",
+    )
+    latest_period = _lock_latest_billing_period(locked_service)
+
+    existing = _existing_operation_result(
+        service=locked_service,
+        operation_id=operation_uuid,
+        period_type=BillingPeriod.PERIOD_ACTIVATION,
+        expected_previous_period_id=None,
+    )
+    if existing is not None:
+        return existing
+    if latest_period is not None:
+        raise ValidationError("Billing period history already exists for this service.")
+
+    effective_at = _validate_aware_timestamp(effective_at or timezone.now(), "Effective time")
+    period = _save_billing_period(
+        _create_billing_period(
+            service=locked_service,
+            subscription=locked_subscription,
+            sequence_number=1,
+            period_type=BillingPeriod.PERIOD_ACTIVATION,
+            operation_id=operation_uuid,
+            previous_period=None,
+            effective_at=effective_at,
+        )
+    )
+    _record_billing_period_event(
+        action="billing_period.activated",
+        period=period,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    return period
+
+
+@transaction.atomic
+def renew_billing_period(
+    *,
+    service: Service,
+    operation_id,
+    expected_previous_period_id,
+    reason: str,
+    actor,
+    request: HttpRequest | None = None,
+    effective_at=None,
+) -> BillingPeriod:
+    _require_permission(actor, "subscribers.view_service", "billing.add_billingperiod")
+    if not actor.has_perm("billing.view_subscription"):
+        raise PermissionDenied("You do not have permission to create billing periods.")
+    reason = _validate_reason(reason)
+    operation_uuid = _normalize_operation_id(operation_id)
+    expected_previous_uuid = _normalize_expected_previous_period_id(expected_previous_period_id)
+    if expected_previous_uuid is None:
+        raise ValidationError("Renewal requires the latest billing period.")
+
+    existing = _existing_operation_result(
+        service=service,
+        operation_id=operation_uuid,
+        period_type=BillingPeriod.PERIOD_RENEWAL,
+        expected_previous_period_id=expected_previous_uuid,
+    )
+    if existing is not None:
+        return existing
+
+    locked_service = _lock_service_and_subscriber(service)
+    locked_subscription = _assert_billing_period_eligibility(
+        service=locked_service,
+        subscription=_lock_current_active_subscription(locked_service),
+        action="renewed",
+    )
+    latest_period = _lock_latest_billing_period(locked_service)
+
+    existing = _existing_operation_result(
+        service=locked_service,
+        operation_id=operation_uuid,
+        period_type=BillingPeriod.PERIOD_RENEWAL,
+        expected_previous_period_id=expected_previous_uuid,
+    )
+    if existing is not None:
+        return existing
+    if latest_period is None:
+        raise ValidationError("Renewal requires an existing billing period.")
+    if latest_period.pk != expected_previous_uuid:
+        raise ValidationError(STALE_BILLING_PERIOD_MESSAGE)
+
+    effective_at = _validate_aware_timestamp(effective_at or timezone.now(), "Effective time")
+    period = _save_billing_period(
+        _create_billing_period(
+            service=locked_service,
+            subscription=locked_subscription,
+            sequence_number=latest_period.sequence_number + 1,
+            period_type=BillingPeriod.PERIOD_RENEWAL,
+            operation_id=operation_uuid,
+            previous_period=latest_period,
+            effective_at=effective_at,
+        )
+    )
+    _record_billing_period_event(
+        action="billing_period.renewed",
+        period=period,
+        actor=actor,
+        request=request,
+        reason=reason,
+    )
+    return period

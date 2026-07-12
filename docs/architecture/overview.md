@@ -17,11 +17,11 @@ Do not create a microservice system for the MVP. Do not create one Django app pe
 
 The database should be PostgreSQL. Background jobs should use Celery with Redis or a reviewed broker alternative. The UI should use Django templates, HTMX, Tailwind CSS, and minimal JavaScript only where needed.
 
-## Implemented Through Phase 4
+## Implemented Through Phase 5
 
-The current application implements the Django foundation, staff users and roles, audit events, organization defaults, package catalog, subscriber registry, service references, and manual package assignment with immutable subscription history.
+The current application implements the Django foundation, staff users and roles, audit events, organization defaults, package catalog, subscriber registry, service references, manual package assignment with immutable subscription history, and manual billing periods with derived billing state.
 
-Phase 4 subscriptions are not billing records. They do not create charges, wallets, ledgers, invoices, automatic renewals, automatic expiry, grace-state automation, payment records, RADIUS data, PPPoE credentials, RouterOS actions, provisioning jobs, installation fees, equipment billing, customer portals, notifications, or live network actions.
+Phase 5 billing periods are access-period records, not payment records. They do not create charges, wallets, ledgers, invoices, automatic renewals, automatic expiry, automatic suspension, payment records, RADIUS data, PPPoE credentials, RouterOS actions, provisioning jobs, installation fees, equipment billing, customer portals, notifications, or live network actions.
 
 ## Primary Components
 
@@ -63,7 +63,7 @@ Subscribers, service references, account numbers, and active/inactive status. Se
 
 ### billing
 
-Packages and manual subscription history. Renewal charges, wallets, append-only ledger, invoices, receipts, expiry enforcement, and grace-state automation remain future work.
+Packages, manual subscription history, manual billing-period history, manual renewals, and derived billing state. Renewal charges, wallets, append-only ledger, invoices, receipts, payment allocation, expiry enforcement, automatic renewal, automatic suspension, and grace-state automation remain future work.
 
 ### payments
 

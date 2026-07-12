@@ -9,13 +9,16 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from subscribers.models import Service
 
-from .forms import PackageSearchForm, PlanForm, SubscriptionPackageForm
-from .models import Plan, Subscription
+from .forms import BillingPeriodActionForm, PackageSearchForm, PlanForm, SubscriptionPackageForm
+from .models import BillingPeriod, Plan, Subscription
 from .services import (
+    activate_billing_period,
     assign_package,
+    billing_state_for_service,
     change_subscription_package,
     create_package,
     end_subscription,
+    renew_billing_period,
     set_package_active,
     update_package,
 )
@@ -232,3 +235,84 @@ def subscription_end(request, pk):
     else:
         messages.success(request, "Subscription ended.")
     return redirect("subscriber_detail", pk=subscription.service.subscriber_id)
+
+
+@login_required
+@permission_required("subscribers.view_service", raise_exception=True)
+@permission_required("billing.view_subscription", raise_exception=True)
+@permission_required("billing.add_billingperiod", raise_exception=True)
+def billing_period_activate(request, service_pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    service = get_object_or_404(Service.objects.select_related("subscriber"), pk=service_pk)
+    form = BillingPeriodActionForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("subscriber_detail", pk=service.subscriber_id)
+    try:
+        activate_billing_period(
+            service=service,
+            operation_id=form.cleaned_data["operation_id"],
+            expected_previous_period_id=form.cleaned_data["expected_previous_period_id"],
+            reason=form.cleaned_data["reason"],
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Billing period activated.")
+    return redirect("subscriber_detail", pk=service.subscriber_id)
+
+
+@login_required
+@permission_required("subscribers.view_service", raise_exception=True)
+@permission_required("billing.view_subscription", raise_exception=True)
+@permission_required("billing.add_billingperiod", raise_exception=True)
+def billing_period_renew(request, service_pk):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    service = get_object_or_404(Service.objects.select_related("subscriber"), pk=service_pk)
+    form = BillingPeriodActionForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, error)
+        return redirect("subscriber_detail", pk=service.subscriber_id)
+    try:
+        renew_billing_period(
+            service=service,
+            operation_id=form.cleaned_data["operation_id"],
+            expected_previous_period_id=form.cleaned_data["expected_previous_period_id"],
+            reason=form.cleaned_data["reason"],
+            actor=request.user,
+            request=request,
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(request, "Service renewed.")
+    return redirect("subscriber_detail", pk=service.subscriber_id)
+
+
+@login_required
+@permission_required("subscribers.view_service", raise_exception=True)
+@permission_required("billing.view_subscription", raise_exception=True)
+@permission_required("billing.view_billingperiod", raise_exception=True)
+def billing_period_history(request, service_pk):
+    service = get_object_or_404(Service.objects.select_related("subscriber"), pk=service_pk)
+    periods = (
+        BillingPeriod.objects.filter(service=service)
+        .select_related("subscription", "previous_period")
+        .order_by("-sequence_number")
+    )
+    paginator = Paginator(periods, 20)
+    page = paginator.get_page(request.GET.get("page"))
+    current_state = billing_state_for_service(service)
+    return render(
+        request,
+        "billing/billing_period_history.html",
+        {"service": service, "page": page, "current_state": current_state},
+    )

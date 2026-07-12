@@ -2,7 +2,7 @@
 
 ## Supported Status
 
-This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, and Phase 4 package assignments. It is not production-ready for payments, billing charges, RADIUS, or RouterOS operations.
+This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, Phase 4 package assignments, and Phase 5 billing periods. It is not production-ready for payments, billing charges, RADIUS, or RouterOS operations.
 
 Security requirements in this document are binding for later phases unless explicitly superseded by a reviewed ADR.
 
@@ -24,6 +24,7 @@ Security requirements in this document are binding for later phases unless expli
 - Phase 2 package catalog with audited create, update, deactivate, and reactivate workflows
 - Phase 3 subscriber and service registry with audited create, update, deactivate, and reactivate workflows
 - Phase 4 audited package assignment, package change, and subscription ending workflows with immutable package snapshots
+- Phase 5 audited manual billing-period activation and renewal workflows with immutable period snapshots
 
 ## Package Catalog Security
 
@@ -48,6 +49,18 @@ Subscription mutations must acquire row locks in service-first order: service an
 Subscription information on subscriber pages requires both `subscribers.view_service` and `billing.view_subscription`. Mutations require `subscribers.view_service` plus `billing.add_subscription` or `billing.change_subscription`.
 
 The Django admin is read-only for subscriptions. These are application-level controls, not database-level controls; direct SQL access or compromised database credentials can still alter rows.
+
+## Billing Period Security
+
+Billing period mutations must go through audited service-layer functions. Manual activation and renewal snapshot the active subscription at creation time, store price as integer KES minor units, and use operation IDs plus expected previous-period checks to prevent duplicate or stale manual renewals.
+
+Billing periods are append-only in application code. Identity, sequence, date, relationship, and commercial snapshot fields are immutable through model save, queryset update, and bulk update paths. Model delete and queryset delete are rejected in application code. Direct database access remains outside these application controls.
+
+Billing period creation must acquire row locks in service-first order: service and subscriber, then the current active subscription, then the latest billing period. PostgreSQL CI is the authoritative concurrency check for sequence allocation and stale-form races; SQLite-only local tests do not prove row-lock blocking semantics.
+
+Billing period data on subscriber pages and history pages requires `subscribers.view_service`, `billing.view_subscription`, and `billing.view_billingperiod`. Creating a period requires `subscribers.view_service`, `billing.view_subscription`, and `billing.add_billingperiod`. Ordinary roles are not granted `billing.change_billingperiod` or `billing.delete_billingperiod`.
+
+Manual renewal records access-period intent only. They do not claim payment receipt, create charges, create invoices, update wallets or ledgers, call M-PESA, suspend services, or enforce network access.
 
 ## Audit Immutability Boundary
 

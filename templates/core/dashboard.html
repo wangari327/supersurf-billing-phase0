@@ -82,6 +82,21 @@
     </section>
   {% endif %}
 
+  {% if billing_period_summary %}
+    <section class="card p-4">
+      <div>
+        <h2 class="text-lg font-semibold">Billing periods</h2>
+        <p class="mt-1 text-sm text-slate-600">
+          {{ billing_period_summary.unactivated_count }} unactivated,
+          {{ billing_period_summary.active_count }} active,
+          {{ billing_period_summary.grace_count }} in grace,
+          {{ billing_period_summary.expired_count }} expired
+        </p>
+        <p class="mt-1 text-sm text-slate-600">Manual periods only; network enforcement is not implemented.</p>
+      </div>
+    </section>
+  {% endif %}
+
   <section class="card p-4">
     <h2 class="text-lg font-semibold">Coming later</h2>
     <div class="mt-3 flex flex-wrap gap-2">

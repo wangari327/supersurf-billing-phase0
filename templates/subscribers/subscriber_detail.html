@@ -92,6 +92,9 @@
                 {% if can_view_subscriptions %}
                   <th class="px-4 py-3 text-left">Package</th>
                 {% endif %}
+                {% if can_view_billing_periods %}
+                  <th class="px-4 py-3 text-left">Billing period</th>
+                {% endif %}
                 <th class="px-4 py-3 text-left">Actions</th>
               </tr>
             </thead>
@@ -138,6 +141,36 @@
                               </div>
                             {% endfor %}
                           </div>
+                        </div>
+                      {% endif %}
+                    </td>
+                  {% endif %}
+                  {% if can_view_billing_periods %}
+                    <td class="px-4 py-3">
+                      {% if row.latest_period %}
+                        <div class="space-y-1">
+                          {% if row.billing_state == "active" %}
+                            <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Active</span>
+                          {% elif row.billing_state == "grace" %}
+                            <span class="badge bg-amber-50 text-amber-900 ring-amber-700/20">Grace</span>
+                          {% elif row.billing_state == "expired" %}
+                            <span class="badge bg-rose-50 text-rose-800 ring-rose-700/20">Expired</span>
+                          {% else %}
+                            <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Not activated</span>
+                          {% endif %}
+                          <p class="font-medium">{{ row.latest_period.plan_name }}</p>
+                          <p>{{ row.latest_period.formatted_price }}</p>
+                          <p class="text-slate-600">Start {{ row.latest_period.starts_at|date:"Y-m-d H:i" }}</p>
+                          <p class="text-slate-600">Expiry {{ row.latest_period.expires_at|date:"Y-m-d H:i" }}</p>
+                          <p class="text-slate-600">Grace until {{ row.latest_period.grace_until|date:"Y-m-d H:i" }}</p>
+                          <p class="text-slate-600">Network enforcement is not implemented.</p>
+                          <a class="btn mt-2" href="{% url 'billing_period_history' service.pk %}">History</a>
+                        </div>
+                      {% else %}
+                        <div class="space-y-1">
+                          <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Not activated</span>
+                          <p class="text-slate-600">No billing period has been created.</p>
+                          <p class="text-slate-600">Network enforcement is not implemented.</p>
                         </div>
                       {% endif %}
                     </td>
@@ -208,7 +241,36 @@
                         {% endif %}
                       </div>
                     {% endif %}
-                    {% if not can_change_service and not can_assign_subscription and not can_change_subscription %}
+                    {% if can_view_billing_periods %}
+                      <div class="mt-3 space-y-3">
+                        {% if can_add_billing_period %}
+                          {% if current %}
+                            {% if row.latest_period %}
+                              <form method="post" action="{% url 'billing_period_renew' service.pk %}" class="space-y-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="operation_id" value="{{ row.renewal_operation_id }}">
+                                <input type="hidden" name="expected_previous_period_id" value="{{ row.expected_previous_period_id }}">
+                                <label class="label" for="renew_reason_{{ service.pk }}">Reason</label>
+                                <textarea id="renew_reason_{{ service.pk }}" class="field" name="reason" rows="2" required></textarea>
+                                <button class="btn btn-primary" type="submit">Renew service</button>
+                              </form>
+                            {% else %}
+                              <form method="post" action="{% url 'billing_period_activate' service.pk %}" class="space-y-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="operation_id" value="{{ row.activation_operation_id }}">
+                                <input type="hidden" name="expected_previous_period_id" value="">
+                                <label class="label" for="activate_reason_{{ service.pk }}">Reason</label>
+                                <textarea id="activate_reason_{{ service.pk }}" class="field" name="reason" rows="2" required></textarea>
+                                <button class="btn btn-primary" type="submit">Activate billing period</button>
+                              </form>
+                            {% endif %}
+                          {% else %}
+                            <p class="text-sm text-slate-600">Assign a package before creating a billing period.</p>
+                          {% endif %}
+                        {% endif %}
+                      </div>
+                    {% endif %}
+                    {% if not can_change_service and not can_assign_subscription and not can_change_subscription and not can_add_billing_period %}
                       <span class="text-slate-500">-</span>
                     {% endif %}
                   </td>

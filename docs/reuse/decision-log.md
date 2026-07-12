@@ -101,3 +101,9 @@ Reason: SuperSurf needs stable subscriber and service identifiers before later s
 Decision: Phase 4 creates `billing.Subscription` as immutable package-assignment history with package snapshots. It does not create charges, invoices, wallets, ledgers, renewals, payment records, RADIUS rows, PPPoE credentials, RouterOS calls, or provisioning jobs.
 
 Reason: Operators need a safe way to record which package applies to a service before any billing, renewal, payment, or network automation depends on that relationship. Snapshotting package terms preserves history when package definitions change later.
+
+## D018: Add Manual Billing Periods Before Payments
+
+Decision: Phase 5 creates `billing.BillingPeriod` as append-only manual access-period history with snapshots copied from the active subscription. It supports manual activation and renewal, operation ID idempotency, stale-form checks, derived billing state, and PostgreSQL-tested sequence allocation. It does not create charges, invoices, wallets, ledgers, payment records, M-PESA records, automatic renewals, automatic suspension, RADIUS rows, PPPoE credentials, RouterOS calls, provisioning jobs, customer portals, notifications, installation fees, or equipment billing.
+
+Reason: Operators need a reviewed way to record access periods and apply approved renewal date rules before any money movement or network enforcement is connected to the platform. Keeping payment claims and network actions out of Phase 5 prevents manual renewal from being mistaken for received revenue or actual service suspension/reactivation.

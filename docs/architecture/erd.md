@@ -2,7 +2,7 @@
 
 This is a Phase 0.5 logical model, not a production migration.
 
-## Implemented Through Phase 4
+## Implemented Through Phase 5
 
 ```mermaid
 erDiagram
@@ -10,7 +10,10 @@ erDiagram
     STAFF_USER ||--o{ AUDIT_EVENT : causes
     SUBSCRIBER ||--o{ SERVICE : owns
     SERVICE ||--o{ SUBSCRIPTION : has
+    SERVICE ||--o{ BILLING_PERIOD : has
     PLAN ||--o{ SUBSCRIPTION : snapshots
+    SUBSCRIPTION ||--o{ BILLING_PERIOD : snapshots
+    BILLING_PERIOD ||--o| BILLING_PERIOD : precedes
 
     ORGANIZATION {
         uuid id
@@ -76,9 +79,29 @@ erDiagram
         int duration_days
         int grace_period_hours
     }
+    BILLING_PERIOD {
+        uuid id
+        uuid service_id
+        uuid subscription_id
+        int sequence_number
+        string period_type
+        uuid operation_id
+        uuid previous_period_id
+        datetime effective_at
+        datetime starts_at
+        datetime expires_at
+        datetime grace_until
+        string plan_name
+        int download_speed_mbps
+        int price_minor
+        string currency
+        int duration_days
+        int grace_period_hours
+        datetime created_at
+    }
 ```
 
-`SUBSCRIPTION` is manual package-assignment history only in Phase 4. Billing charges, invoices, discounts, renewals, expiry enforcement, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, wallets, ledgers, installation, and equipment entities remain future work.
+`SUBSCRIPTION` is manual package-assignment history. `BILLING_PERIOD` is append-only manual access-period history with subscription snapshots, manual activation and renewal, and derived billing state. Billing periods do not claim payment receipt and do not enforce network access. Billing charges, invoices, discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, payments, wallets, ledgers, installation, and equipment entities remain future work.
 
 ## Future Logical Model
 

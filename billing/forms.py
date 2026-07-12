@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from django import forms
 from django.core.exceptions import ValidationError
 
@@ -109,6 +111,37 @@ class SubscriptionPackageForm(forms.Form):
             "price_minor",
             "name",
         )
+
+    def clean_reason(self) -> str:
+        reason = self.cleaned_data["reason"].strip()
+        if not reason:
+            raise ValidationError("Reason is required.")
+        return reason
+
+
+class BillingPeriodActionForm(forms.Form):
+    operation_id = forms.UUIDField(widget=forms.HiddenInput)
+    expected_previous_period_id = forms.CharField(required=False, widget=forms.HiddenInput)
+    reason = forms.CharField(
+        label="Reason",
+        required=True,
+        widget=forms.Textarea(attrs={"class": "field", "rows": 2}),
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        initial = kwargs.setdefault("initial", {})
+        initial.setdefault("operation_id", uuid.uuid4())
+        super().__init__(*args, **kwargs)
+
+    def clean_expected_previous_period_id(self) -> str:
+        value = self.cleaned_data["expected_previous_period_id"].strip()
+        if not value:
+            return ""
+        try:
+            uuid.UUID(value)
+        except ValueError as exc:
+            raise ValidationError("Expected previous billing period is not valid.") from exc
+        return value
 
     def clean_reason(self) -> str:
         reason = self.cleaned_data["reason"].strip()

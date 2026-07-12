@@ -5,11 +5,13 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import PermissionDenied
 from django.db import connection, transaction
+from django.db.models import OuterRef, Subquery
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 
 from audit.service import record_event
-from billing.models import Plan, Subscription
+from billing.models import BillingPeriod, Plan, Subscription
 from subscribers.models import Service, Subscriber
 
 from .forms import BrandingForm, OrganizationForm, SensitiveOrganizationForm
@@ -30,9 +32,11 @@ def dashboard(request):
     can_view_subscribers = request.user.has_perm("subscribers.view_subscriber")
     can_view_services = request.user.has_perm("subscribers.view_service")
     can_view_subscriptions = request.user.has_perm("billing.view_subscription")
+    can_view_billing_periods = request.user.has_perm("billing.view_billingperiod")
     package_summary = None
     subscriber_summary = None
     subscription_summary = None
+    billing_period_summary = None
     if can_view_packages:
         package_summary = {
             "active_count": Plan.objects.filter(is_active=True).count(),
@@ -54,6 +58,34 @@ def dashboard(request):
                 status=Subscription.STATUS_ACTIVE
             ).count(),
             "ended_count": Subscription.objects.filter(status=Subscription.STATUS_ENDED).count(),
+        }
+    if can_view_services and can_view_subscriptions and can_view_billing_periods:
+        now = timezone.now()
+        latest_period_subquery = (
+            BillingPeriod.objects.filter(service_id=OuterRef("pk"))
+            .order_by("-sequence_number")
+            .values("pk")[:1]
+        )
+        latest_period_ids = [
+            period_id
+            for period_id in Service.objects.annotate(
+                latest_period_id=Subquery(latest_period_subquery)
+            ).values_list("latest_period_id", flat=True)
+            if period_id is not None
+        ]
+        latest_periods = BillingPeriod.objects.filter(pk__in=latest_period_ids)
+        billing_period_summary = {
+            "unactivated_count": Service.objects.annotate(
+                latest_period_id=Subquery(latest_period_subquery)
+            )
+            .filter(latest_period_id__isnull=True)
+            .count(),
+            "active_count": latest_periods.filter(expires_at__gt=now).count(),
+            "grace_count": latest_periods.filter(
+                expires_at__lte=now,
+                grace_until__gt=now,
+            ).count(),
+            "expired_count": latest_periods.filter(grace_until__lte=now).count(),
         }
     return render(
         request,
@@ -77,6 +109,7 @@ def dashboard(request):
             "subscriber_summary": subscriber_summary,
             "can_view_services": can_view_services,
             "subscription_summary": subscription_summary,
+            "billing_period_summary": billing_period_summary,
         },
     )
 

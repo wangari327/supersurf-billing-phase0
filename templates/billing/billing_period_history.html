@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Billing periods - {{ service.service_reference }}{% endblock %}
+
+{% block content %}
+<section class="max-w-5xl">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold">Billing periods</h1>
+      <p class="mt-1 text-sm text-slate-600">{{ service.service_reference }}{% if service.label %} - {{ service.label }}{% endif %}</p>
+    </div>
+    {% if current_state == "active" %}
+      <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Active</span>
+    {% elif current_state == "grace" %}
+      <span class="badge bg-amber-50 text-amber-900 ring-amber-700/20">Grace</span>
+    {% elif current_state == "expired" %}
+      <span class="badge bg-rose-50 text-rose-800 ring-rose-700/20">Expired</span>
+    {% else %}
+      <span class="badge bg-slate-50 text-slate-700 ring-slate-300">Not activated</span>
+    {% endif %}
+  </div>
+
+  <div class="mt-6 flex flex-wrap gap-2">
+    <a class="btn" href="{% url 'subscriber_detail' service.subscriber_id %}">Back to subscriber</a>
+  </div>
+
+  <div class="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+    {% if page.object_list %}
+      <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+          <tr>
+            <th class="px-4 py-3 text-left">Sequence</th>
+            <th class="px-4 py-3 text-left">Type</th>
+            <th class="px-4 py-3 text-left">Package</th>
+            <th class="px-4 py-3 text-left">Effective</th>
+            <th class="px-4 py-3 text-left">Start</th>
+            <th class="px-4 py-3 text-left">Expiry</th>
+            <th class="px-4 py-3 text-left">Grace until</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {% for period in page.object_list %}
+            <tr>
+              <td class="px-4 py-3 font-medium">{{ period.sequence_number }}</td>
+              <td class="px-4 py-3">{{ period.get_period_type_display }}</td>
+              <td class="px-4 py-3">
+                <p class="font-medium">{{ period.plan_name }}</p>
+                <p>{{ period.download_speed_mbps }} Mbps / {{ period.formatted_price }}</p>
+              </td>
+              <td class="px-4 py-3">{{ period.effective_at|date:"Y-m-d H:i" }}</td>
+              <td class="px-4 py-3">{{ period.starts_at|date:"Y-m-d H:i" }}</td>
+              <td class="px-4 py-3">{{ period.expires_at|date:"Y-m-d H:i" }}</td>
+              <td class="px-4 py-3">{{ period.grace_until|date:"Y-m-d H:i" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="p-6 text-sm text-slate-600">No billing periods have been created.</p>
+    {% endif %}
+  </div>
+
+  {% if page.has_other_pages %}
+    <div class="mt-4 flex gap-2">
+      {% if page.has_previous %}
+        <a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>
+      {% endif %}
+      {% if page.has_next %}
+        <a class="btn" href="?page={{ page.next_page_number }}">Next</a>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

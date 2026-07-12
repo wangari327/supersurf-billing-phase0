@@ -1413,6 +1413,10 @@ class Payment(models.Model):
                 condition=Q(amount_minor__gt=0),
                 name="payment_amount_positive",
             ),
+            models.CheckConstraint(
+                condition=~Q(provider_transaction_id=""),
+                name="payment_provider_transaction_nonblank",
+            ),
             models.CheckConstraint(condition=Q(currency="KES"), name="payment_currency_kes"),
         ]
 

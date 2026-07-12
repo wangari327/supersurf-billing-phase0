@@ -14,7 +14,7 @@ Phase 9 may connect a thin M-PESA adapter to the canonical payment service once 
 
 - UUID primary key
 - protected provider-profile foreign key
-- provider transaction identifier
+- required provider transaction identifier, trimmed by the service/model and protected by a database non-empty constraint
 - positive integer KES minor-unit amount
 - fixed `KES` currency
 - aware received timestamp
@@ -87,9 +87,13 @@ PostgreSQL CI is authoritative for duplicate provider callbacks, ledger sequence
 
 ## Permissions
 
-Administrator and Finance can ingest fake payments and resolve unmatched cases through the service layer. They receive the payment and unmatched-case add/change permissions required for those workflows.
+Administrator and Finance can ingest fake payments and resolve unmatched cases through the service layer. They receive the payment, payment-allocation, Wallet, ledger, subscriber, and unmatched-case permissions required for those workflows.
 
-SuperSurf Support and Read Only can view payment, allocation, and unmatched-case records. They cannot ingest fake payments, resolve unmatched cases, mutate payments, or mutate allocations.
+`billing.view_payment` allows payment list/detail access and exposes payment-owned data: provider transaction ID, provider profile, amount, received time, original account reference, and derived allocated/unmatched state. Allocation destination details require all of `billing.view_paymentallocation`, `billing.view_wallet`, `billing.view_ledgerentry`, and `subscribers.view_subscriber`.
+
+Unmatched case details require `billing.view_unmatchedpaymentcase`. The unmatched-case list also requires `billing.view_payment` because it displays payment-owned fields. Resolution links and routes mirror the full service permission set.
+
+SuperSurf Support and Read Only can view payment, allocation, and unmatched-case records because they have the supporting view permissions. They cannot ingest fake payments, resolve unmatched cases, mutate payments, or mutate allocations.
 
 NOC receives no payment, allocation, or unmatched-payment permissions.
 
@@ -105,9 +109,9 @@ Phase 8 adds:
 - `/payments/unmatched/`
 - `/payments/unmatched/<uuid:pk>/resolve/`
 
-The fake-payment form is visible only outside production and warns that it is not M-PESA. Payment lists can filter by allocated or unmatched state, provider profile, and date, and can search provider transaction IDs, account references, and subscriber account numbers.
+The fake-payment form is visible only outside production and only when the user has the same supporting permissions required by the fake-ingestion route and service. It warns that it is not M-PESA. Payment lists can filter by allocated or unmatched state, provider profile, and date. Search by provider transaction ID and original account reference is available with `billing.view_payment`; search through allocated subscriber account numbers requires both `billing.view_paymentallocation` and `subscribers.view_subscriber`.
 
-Payment details show amount, provider, reference, received time, allocation, and unmatched-case state. Unmatched resolution requires selecting a subscriber explicitly and entering a reason.
+Payment details show amount, provider, reference, received time, and derived state to users with `billing.view_payment`. Allocation destination, Wallet, ledger, allocation ID, and operator details are shown only when the allocation-detail permission set is complete. Unmatched reason, status, case identifier, and resolution action are shown only with unmatched-case visibility. Unmatched resolution requires selecting a subscriber explicitly and entering a reason.
 
 Operation IDs and raw callback payloads are not displayed. Subscriber Wallet history displays payment credits and provider transaction IDs only to users with payment visibility.
 
@@ -131,6 +135,6 @@ Payment, PaymentAllocation, and UnmatchedPaymentCase admin pages are read-only. 
 
 ## Boundaries And Risks
 
-Application code rejects model save changes, queryset updates, bulk updates, model deletion, and queryset deletion for immutable payment records. These are application-level controls only. Privileged direct database writes or compromised database credentials remain outside this protection.
+Application code rejects model save changes, queryset updates, bulk updates, model deletion, and queryset deletion for immutable payment records. The database also rejects empty provider transaction identifiers. These are application-level controls plus a narrow data-integrity constraint; privileged direct database writes or compromised database credentials remain outside application immutability protection.
 
 Matched payments credit the account-level Wallet only. Partial and overpayments remain Wallet credit. Service renewal remains a separate operator action, and automatic Wallet spending is not implemented in Phase 8.

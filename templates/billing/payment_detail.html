@@ -9,7 +9,7 @@
       <h1 class="text-2xl font-semibold">Payment {{ payment.provider_transaction_id }}</h1>
       <p class="mt-1 text-sm text-slate-600">{{ payment.provider_profile.name }}</p>
     </div>
-    {% if allocation %}
+    {% if has_allocation %}
       <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Allocated</span>
     {% else %}
       <span class="badge bg-amber-50 text-amber-900 ring-amber-700/20">Unmatched</span>
@@ -35,7 +35,7 @@
     </div>
   </div>
 
-  {% if allocation %}
+  {% if allocation and can_view_allocation_details %}
     <section class="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
       <div class="border-b border-slate-200 bg-slate-50 px-4 py-3">
         <h2 class="font-semibold">Wallet allocation</h2>
@@ -57,9 +57,22 @@
           <p class="text-sm text-slate-600">Balance after</p>
           <p class="font-medium">{{ allocation.ledger_entry.formatted_balance_after }}</p>
         </div>
+        <div>
+          <p class="text-sm text-slate-600">Allocation ID</p>
+          <p class="font-medium">{{ allocation.pk }}</p>
+        </div>
+        <div>
+          <p class="text-sm text-slate-600">Operator</p>
+          <p class="font-medium">{{ allocation.created_by.username }}</p>
+        </div>
       </div>
     </section>
-  {% elif unmatched_case %}
+  {% elif has_allocation %}
+    <section class="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+      <h2 class="font-semibold">Wallet allocation</h2>
+      <p class="mt-1 text-sm text-slate-600">Allocation details require additional permissions.</p>
+    </section>
+  {% elif unmatched_case and can_view_unmatched_case %}
     <section class="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
       <h2 class="font-semibold text-amber-950">Unmatched payment</h2>
       <p class="mt-1 text-sm text-amber-900">{{ unmatched_case.get_reason_code_display }}</p>

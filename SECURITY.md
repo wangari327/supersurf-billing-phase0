@@ -95,7 +95,7 @@ Wallet-funded charges are not payment records, receipts, invoices, discounts, au
 
 Phase 8 payment ingestion is fake-provider only. Active fake provider profiles in `test` or `sandbox` environments may ingest through the development workflow; fake ingestion is blocked when `SUPERSURF_ENVIRONMENT=PRODUCTION`. Structural M-PESA provider profiles may exist for future modelling, but they cannot ingest payments in this phase.
 
-Payment records store provider-neutral identifiers, integer KES minor-unit amounts, aware received timestamps, optional account references, and optional SHA-256 payload digests. They do not store raw callback payloads, full payer phone numbers, access tokens, credentials, card data, bank credentials, mutable payment status, service package links, billing-period links, invoices, or receipts.
+Payment records store provider-neutral identifiers, integer KES minor-unit amounts, aware received timestamps, optional account references, and optional SHA-256 payload digests. Provider transaction identifiers are trimmed by the service/model and empty values are rejected by both validation and a database check constraint. Payment records do not store raw callback payloads, full payer phone numbers, access tokens, credentials, card data, bank credentials, mutable payment status, service package links, billing-period links, invoices, or receipts.
 
 `Payment` and `PaymentAllocation` records are immutable and append-only in application code after creation, including their creation timestamps. Model save, queryset update, bulk update, model delete, and queryset delete paths are rejected. Direct database access remains outside these application controls.
 
@@ -107,7 +107,9 @@ Provider retries are idempotent only when provider profile, provider transaction
 
 Payment audit metadata must not store operation IDs, raw request payloads, full phone numbers, email addresses, subscriber display names, credentials, tokens, callback secrets, CSRF tokens, card credentials, or bank credentials.
 
-Administrator and Finance can ingest fake payments and resolve unmatched cases. SuperSurf Support and Read Only can view payment, allocation, and unmatched-case records. NOC receives no payment permissions. No ordinary role receives payment, allocation, or unmatched-case delete permissions, and ordinary roles do not receive change permissions for `Payment` or `PaymentAllocation`.
+`billing.view_payment` exposes payment-owned list/detail fields and derived allocated/unmatched state. Allocation destination details require `billing.view_paymentallocation`, `billing.view_wallet`, `billing.view_ledgerentry`, and `subscribers.view_subscriber`. Unmatched reason, case status, identifiers, and resolution actions require `billing.view_unmatchedpaymentcase`; unmatched-case lists also require `billing.view_payment`.
+
+Administrator and Finance can ingest fake payments and resolve unmatched cases. SuperSurf Support and Read Only can view payment, allocation, and unmatched-case records because they have the supporting view permissions. NOC receives no payment permissions. No ordinary role receives payment, allocation, or unmatched-case delete permissions, and ordinary roles do not receive change permissions for `Payment` or `PaymentAllocation`.
 
 ## Audit Immutability Boundary
 

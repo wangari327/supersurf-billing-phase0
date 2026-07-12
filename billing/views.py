@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -448,13 +448,61 @@ def _end_of_day(value):
     return timezone.make_aware(datetime.combine(value, time.max))
 
 
+ALLOCATION_DETAIL_PERMISSIONS = (
+    "billing.view_paymentallocation",
+    "billing.view_wallet",
+    "billing.view_ledgerentry",
+    "subscribers.view_subscriber",
+)
+ALLOCATION_SEARCH_PERMISSIONS = (
+    "billing.view_paymentallocation",
+    "subscribers.view_subscriber",
+)
+FAKE_PAYMENT_PERMISSIONS = (
+    "subscribers.view_subscriber",
+    "billing.view_paymentproviderprofile",
+    "billing.view_payment",
+    "billing.add_payment",
+    "billing.view_paymentallocation",
+    "billing.add_paymentallocation",
+    "billing.view_wallet",
+    "billing.view_ledgerentry",
+    "billing.add_ledgerentry",
+)
+UNMATCHED_RESOLUTION_PERMISSIONS = (
+    "subscribers.view_subscriber",
+    "billing.view_payment",
+    "billing.view_paymentallocation",
+    "billing.add_paymentallocation",
+    "billing.view_unmatchedpaymentcase",
+    "billing.change_unmatchedpaymentcase",
+    "billing.view_wallet",
+    "billing.view_ledgerentry",
+    "billing.add_ledgerentry",
+)
+
+
+def _has_permissions(user, permissions: tuple[str, ...]) -> bool:
+    return all(user.has_perm(permission) for permission in permissions)
+
+
 @login_required
 @permission_required("billing.view_payment", raise_exception=True)
 def payment_list(request):
     form = PaymentSearchForm(request.GET)
+    can_search_allocation_subscribers = _has_permissions(
+        request.user,
+        ALLOCATION_SEARCH_PERMISSIONS,
+    )
+    if not can_search_allocation_subscribers:
+        form.fields["q"].widget.attrs["placeholder"] = "Transaction ID or account reference"
     payments = (
         Payment.objects.select_related("provider_profile")
-        .prefetch_related("allocations__wallet__subscriber")
+        .annotate(
+            has_allocation=Exists(
+                PaymentAllocation.objects.filter(payment_id=OuterRef("pk"))
+            )
+        )
         .order_by("-received_at", "-created_at")
     )
     query = ""
@@ -469,11 +517,14 @@ def payment_list(request):
         date_from = form.cleaned_data["date_from"]
         date_to = form.cleaned_data["date_to"]
         if query:
-            payments = payments.filter(
-                Q(provider_transaction_id__icontains=query)
-                | Q(account_reference__icontains=query)
-                | Q(allocations__wallet__subscriber__account_number__icontains=query)
-            ).distinct()
+            query_filter = Q(provider_transaction_id__icontains=query) | Q(
+                account_reference__icontains=query
+            )
+            if can_search_allocation_subscribers:
+                query_filter |= Q(
+                    allocations__wallet__subscriber__account_number__icontains=query
+                )
+            payments = payments.filter(query_filter).distinct()
         if provider_profile is not None:
             payments = payments.filter(provider_profile=provider_profile)
         if date_from is not None:
@@ -488,10 +539,9 @@ def payment_list(request):
     page = paginator.get_page(request.GET.get("page"))
     fake_form_visible = (
         settings.SUPERSURF_ENVIRONMENT != "PRODUCTION"
-        and request.user.has_perm("billing.add_payment")
-        and request.user.has_perm("billing.add_paymentallocation")
-        and request.user.has_perm("billing.add_ledgerentry")
+        and _has_permissions(request.user, FAKE_PAYMENT_PERMISSIONS)
     )
+    can_view_unmatched_payment_cases = request.user.has_perm("billing.view_unmatchedpaymentcase")
     return render(
         request,
         "billing/payment_list.html",
@@ -504,6 +554,8 @@ def payment_list(request):
             "date_from": date_from,
             "date_to": date_to,
             "fake_form_visible": fake_form_visible,
+            "can_view_unmatched_payment_cases": can_view_unmatched_payment_cases,
+            "can_search_allocation_subscribers": can_search_allocation_subscribers,
         },
     )
 
@@ -512,37 +564,56 @@ def payment_list(request):
 @permission_required("billing.view_payment", raise_exception=True)
 def payment_detail(request, pk):
     payment = get_object_or_404(Payment.objects.select_related("provider_profile"), pk=pk)
-    allocation = (
-        PaymentAllocation.objects.select_related(
-            "wallet",
-            "wallet__subscriber",
-            "ledger_entry",
-            "created_by",
-        )
-        .filter(payment=payment)
-        .first()
+    has_allocation = PaymentAllocation.objects.filter(payment=payment).exists()
+    can_view_allocation_details = _has_permissions(
+        request.user,
+        ALLOCATION_DETAIL_PERMISSIONS,
     )
-    unmatched_case = UnmatchedPaymentCase.objects.filter(payment=payment).first()
+    allocation = None
+    if can_view_allocation_details:
+        allocation = (
+            PaymentAllocation.objects.select_related(
+                "wallet",
+                "wallet__subscriber",
+                "ledger_entry",
+                "created_by",
+            )
+            .filter(payment=payment)
+            .first()
+        )
+    can_view_unmatched_case = request.user.has_perm("billing.view_unmatchedpaymentcase")
+    unmatched_case = None
+    if can_view_unmatched_case:
+        unmatched_case = (
+            UnmatchedPaymentCase.objects.select_related(
+                "resolved_wallet",
+                "resolution_allocation",
+            )
+            .filter(payment=payment)
+            .first()
+        )
     can_resolve_unmatched = (
         unmatched_case is not None
         and unmatched_case.status == UnmatchedPaymentCase.STATUS_OPEN
-        and request.user.has_perm("billing.change_unmatchedpaymentcase")
-        and request.user.has_perm("billing.add_paymentallocation")
-        and request.user.has_perm("billing.add_ledgerentry")
+        and _has_permissions(request.user, UNMATCHED_RESOLUTION_PERMISSIONS)
     )
     return render(
         request,
         "billing/payment_detail.html",
         {
             "payment": payment,
+            "has_allocation": has_allocation,
             "allocation": allocation,
             "unmatched_case": unmatched_case,
+            "can_view_allocation_details": can_view_allocation_details,
+            "can_view_unmatched_case": can_view_unmatched_case,
             "can_resolve_unmatched": can_resolve_unmatched,
         },
     )
 
 
 @login_required
+@permission_required("subscribers.view_subscriber", raise_exception=True)
 @permission_required("billing.view_paymentproviderprofile", raise_exception=True)
 @permission_required("billing.add_payment", raise_exception=True)
 @permission_required("billing.view_payment", raise_exception=True)
@@ -581,6 +652,7 @@ def fake_payment_create(request):
 
 
 @login_required
+@permission_required("billing.view_payment", raise_exception=True)
 @permission_required("billing.view_unmatchedpaymentcase", raise_exception=True)
 def unmatched_payment_list(request):
     cases = (
@@ -589,10 +661,16 @@ def unmatched_payment_list(request):
     )
     paginator = Paginator(cases, 20)
     page = paginator.get_page(request.GET.get("page"))
-    return render(request, "billing/unmatched_payment_list.html", {"page": page})
+    can_resolve_unmatched = _has_permissions(request.user, UNMATCHED_RESOLUTION_PERMISSIONS)
+    return render(
+        request,
+        "billing/unmatched_payment_list.html",
+        {"page": page, "can_resolve_unmatched": can_resolve_unmatched},
+    )
 
 
 @login_required
+@permission_required("subscribers.view_subscriber", raise_exception=True)
 @permission_required("billing.view_unmatchedpaymentcase", raise_exception=True)
 @permission_required("billing.change_unmatchedpaymentcase", raise_exception=True)
 @permission_required("billing.view_payment", raise_exception=True)

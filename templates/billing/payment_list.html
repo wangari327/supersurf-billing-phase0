@@ -13,7 +13,7 @@
       {% if fake_form_visible %}
         <a class="btn btn-primary" href="{% url 'fake_payment_create' %}">New fake payment</a>
       {% endif %}
-      {% if perms.billing.view_unmatchedpaymentcase %}
+      {% if can_view_unmatched_payment_cases %}
         <a class="btn" href="{% url 'unmatched_payment_list' %}">Unmatched</a>
       {% endif %}
     </div>
@@ -72,7 +72,7 @@
               <td class="px-4 py-3">{{ payment.formatted_amount }}</td>
               <td class="px-4 py-3">{{ payment.received_at|date:"Y-m-d H:i" }}</td>
               <td class="px-4 py-3">
-                {% if payment.is_allocated %}
+                {% if payment.has_allocation %}
                   <span class="badge bg-emerald-50 text-emerald-800 ring-emerald-700/20">Allocated</span>
                 {% else %}
                   <span class="badge bg-amber-50 text-amber-900 ring-amber-700/20">Unmatched</span>

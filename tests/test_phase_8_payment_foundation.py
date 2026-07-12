@@ -11,7 +11,7 @@ from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
-from django.db import close_old_connections, connection
+from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.test import override_settings
 from django.urls import reverse
 
@@ -346,6 +346,48 @@ def test_payment_and_allocation_are_immutable(seeded_roles):
 
 
 @pytest.mark.django_db
+def test_payment_provider_transaction_id_rejects_blank_values(seeded_roles):
+    actor = admin_actor(seeded_roles)
+    subscriber = create_test_subscriber()
+    profile = fake_profile()
+    payment = Payment(
+        provider_profile=profile,
+        provider_transaction_id=" ",
+        amount_minor=120000,
+        currency="KES",
+        received_at=BASE_TIME,
+        account_reference=subscriber.account_number,
+    )
+
+    with pytest.raises(ValidationError, match="Provider transaction ID is required"):
+        payment.full_clean()
+    assert Payment.objects.count() == 0
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Payment.objects.bulk_create(
+                [
+                    Payment(
+                        provider_profile=profile,
+                        provider_transaction_id="",
+                        amount_minor=120000,
+                        currency="KES",
+                        received_at=BASE_TIME,
+                        account_reference=subscriber.account_number,
+                    )
+                ]
+            )
+
+    assert not Payment.objects.filter(provider_transaction_id="").exists()
+    created = ingest(
+        actor,
+        transaction_id="FAKE-NONBLANK-OK",
+        account_reference=subscriber.account_number,
+    )
+    assert created.provider_transaction_id == "FAKE-NONBLANK-OK"
+
+
+@pytest.mark.django_db
 def test_provider_transaction_idempotency_and_conflicts(seeded_roles):
     actor = admin_actor(seeded_roles)
     subscriber = create_test_subscriber()
@@ -448,7 +490,181 @@ def test_fake_ingestion_blocked_in_production_and_mpesa_profiles_rejected(seeded
                 actor,
                 transaction_id="FAKE-PRODUCTION",
                 account_reference=subscriber.account_number,
-            )
+        )
+
+
+@pytest.mark.django_db
+def test_payment_view_only_user_sees_payment_state_without_restricted_details(
+    client,
+    seeded_roles,
+):
+    actor = admin_actor(seeded_roles)
+    subscriber = create_test_subscriber()
+    resolved_payment = ingest(
+        actor,
+        transaction_id="FAKE-VIEW-ONLY-RESOLVED",
+        account_reference="SS999999",
+    )
+    case = UnmatchedPaymentCase.objects.get(payment=resolved_payment)
+    allocation = resolve_unmatched_payment(
+        unmatched_case=case,
+        subscriber=subscriber,
+        operation_id=uuid.uuid4(),
+        reason="Resolve without exposing destination to payment-only users",
+        actor=actor,
+    )
+    unmatched_payment = ingest(
+        actor,
+        transaction_id="FAKE-VIEW-ONLY-UNMATCHED",
+        account_reference="",
+    )
+    unmatched_case = UnmatchedPaymentCase.objects.get(payment=unmatched_payment)
+    payment_only = create_staff_with_permissions(
+        "phase8-payment-only",
+        "billing.view_payment",
+    )
+    client.force_login(payment_only)
+
+    response = client.get(reverse("payment_list"))
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert "FAKE-VIEW-ONLY-RESOLVED" in html
+    assert resolved_payment.formatted_amount in html
+    assert "Allocated" in html
+    assert "New fake payment" not in html
+    assert reverse("unmatched_payment_list") not in html
+
+    response = client.get(reverse("payment_detail", args=[resolved_payment.pk]))
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert "FAKE-VIEW-ONLY-RESOLVED" in html
+    assert "SS999999" in html
+    assert "Allocated" in html
+    assert subscriber.account_number not in html
+    assert str(allocation.wallet_id) not in html
+    assert str(allocation.pk) not in html
+    assert actor.username not in html
+    assert "Ledger sequence" not in html
+    assert "Balance after" not in html
+
+    response = client.get(reverse("payment_detail", args=[unmatched_payment.pk]))
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert "Unmatched" in html
+    assert "Missing reference" not in html
+    assert str(unmatched_case.pk) not in html
+    assert reverse("unmatched_payment_resolve", args=[unmatched_case.pk]) not in html
+    resolve_response = client.get(reverse("unmatched_payment_resolve", args=[unmatched_case.pk]))
+    assert resolve_response.status_code == 403
+
+    response = client.get(reverse("payment_list"), {"q": subscriber.account_number})
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert "FAKE-VIEW-ONLY-RESOLVED" not in html
+
+
+@pytest.mark.django_db
+def test_payment_allocation_permission_without_supporting_views_hides_details(
+    client,
+    seeded_roles,
+):
+    actor = admin_actor(seeded_roles)
+    subscriber = create_test_subscriber()
+    payment = ingest(actor, transaction_id="FAKE-PARTIAL-ALLOCATION-VIEW", account_reference="")
+    case = UnmatchedPaymentCase.objects.get(payment=payment)
+    allocation = resolve_unmatched_payment(
+        unmatched_case=case,
+        subscriber=subscriber,
+        operation_id=uuid.uuid4(),
+        reason="Resolve to subscriber account",
+        actor=actor,
+    )
+    partial_viewer = create_staff_with_permissions(
+        "phase8-partial-allocation-viewer",
+        "billing.view_payment",
+        "billing.view_paymentallocation",
+    )
+    client.force_login(partial_viewer)
+
+    response = client.get(reverse("payment_detail", args=[payment.pk]))
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert "Allocated" in html
+    assert subscriber.account_number not in html
+    assert str(allocation.wallet_id) not in html
+    assert "Ledger sequence" not in html
+    assert "Balance after" not in html
+    assert str(allocation.pk) not in html
+    assert actor.username not in html
+
+
+@pytest.mark.django_db
+def test_complete_allocation_view_permissions_show_payment_allocation_details(
+    client,
+    seeded_roles,
+):
+    actor = admin_actor(seeded_roles)
+    subscriber = create_test_subscriber()
+    payment = ingest(actor, transaction_id="FAKE-COMPLETE-ALLOCATION-VIEW", account_reference="")
+    case = UnmatchedPaymentCase.objects.get(payment=payment)
+    allocation = resolve_unmatched_payment(
+        unmatched_case=case,
+        subscriber=subscriber,
+        operation_id=uuid.uuid4(),
+        reason="Resolve to subscriber account",
+        actor=actor,
+    )
+    complete_viewer = create_staff_with_permissions(
+        "phase8-complete-allocation-viewer",
+        "billing.view_payment",
+        "billing.view_paymentallocation",
+        "billing.view_wallet",
+        "billing.view_ledgerentry",
+        "subscribers.view_subscriber",
+    )
+    client.force_login(complete_viewer)
+
+    response = client.get(reverse("payment_detail", args=[payment.pk]))
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert subscriber.account_number in html
+    assert str(allocation.wallet_id) in html
+    assert "Ledger sequence" in html
+    assert "Balance after" in html
+    assert str(allocation.pk) in html
+    assert actor.username in html
+
+    response = client.get(reverse("payment_list"), {"q": subscriber.account_number})
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert "FAKE-COMPLETE-ALLOCATION-VIEW" in html
+
+
+@pytest.mark.django_db
+def test_unmatched_payment_list_requires_case_and_payment_visibility(client, seeded_roles):
+    actor = admin_actor(seeded_roles)
+    payment = ingest(actor, transaction_id="FAKE-UNMATCHED-LIST-PERMS", account_reference="")
+    unmatched_only = create_staff_with_permissions(
+        "phase8-unmatched-only",
+        "billing.view_unmatchedpaymentcase",
+    )
+    case_and_payment = create_staff_with_permissions(
+        "phase8-unmatched-and-payment",
+        "billing.view_unmatchedpaymentcase",
+        "billing.view_payment",
+    )
+
+    client.force_login(unmatched_only)
+    assert client.get(reverse("unmatched_payment_list")).status_code == 403
+
+    client.force_login(case_and_payment)
+    response = client.get(reverse("unmatched_payment_list"))
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert payment.provider_transaction_id in html
+    assert "Resolve" not in html
 
 
 @pytest.mark.django_db

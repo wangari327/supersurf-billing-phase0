@@ -57,8 +57,8 @@ compose_cmd up -d postgres broker
 wait_for_service_health postgres 60 5
 wait_for_service_health broker 60 5
 
-compose_cmd run --rm --no-deps web uv run --no-dev python manage.py migrate --noinput
-compose_cmd run --rm --no-deps web uv run --no-dev python manage.py seed_roles
+compose_cmd run --rm --no-deps web python manage.py migrate --noinput
+compose_cmd run --rm --no-deps web python manage.py seed_roles
 
 compose_cmd up -d web
 wait_for_service_health web 60 5

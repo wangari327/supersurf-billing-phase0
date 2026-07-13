@@ -39,6 +39,6 @@ fi
 ensure_env_file_secure
 echo "This command is intended for an interactive SSH session, not the deployment workflow."
 echo "The password will be requested by Django and will not be accepted as a command-line argument."
-compose_cmd run --rm web uv run --no-dev python manage.py create_first_owner \
+compose_cmd run --rm web python manage.py create_first_owner \
   --username "${username}" \
   --email "${email}"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -414,11 +415,23 @@ VALID_PRODUCTION_ENV = {
     "DJANGO_ALLOWED_HOSTS": "supersurf.localhost",
     "DJANGO_CSRF_TRUSTED_ORIGINS": "https://supersurf.localhost",
 }
+VALID_PUBLIC_LAB_ENV = {
+    **VALID_PRODUCTION_ENV,
+    "SUPERSURF_ENVIRONMENT": "LAB",
+    "SUPERSURF_PUBLIC_DEPLOYMENT": "true",
+    "DJANGO_SECRET_KEY": "lab-check-local-only-6b3c4f99-8437-4a0d-8401-0bfa0e137ee2",
+    "DJANGO_ALLOWED_HOSTS": "sandbox.supersurf.co.ke,sandbox-api.supersurf.co.ke",
+    "DJANGO_CSRF_TRUSTED_ORIGINS": (
+        "https://sandbox.supersurf.co.ke,https://sandbox-api.supersurf.co.ke"
+    ),
+}
 
 
 def import_settings_with_env(env_updates: dict[str, str]):
     env = os.environ.copy()
-    for key in VALID_PRODUCTION_ENV:
+    for key in set(VALID_PRODUCTION_ENV) | set(VALID_PUBLIC_LAB_ENV) | {
+        "SUPERSURF_STATICFILES_MANIFEST"
+    }:
         env.pop(key, None)
     env.update(env_updates)
     env["PYTHONPATH"] = str(Path.cwd())
@@ -430,6 +443,35 @@ def import_settings_with_env(env_updates: dict[str, str]):
         text=True,
         check=False,
     )
+
+
+def read_settings_with_env(env_updates: dict[str, str], *setting_names: str):
+    env = os.environ.copy()
+    for key in set(VALID_PRODUCTION_ENV) | set(VALID_PUBLIC_LAB_ENV) | {
+        "SUPERSURF_STATICFILES_MANIFEST"
+    }:
+        env.pop(key, None)
+    env.update(env_updates)
+    env["PYTHONPATH"] = str(Path.cwd())
+    names = ", ".join(repr(name) for name in setting_names)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json; import supersurf.settings as settings; "
+                f"names = [{names}]; "
+                "print(json.dumps({name: getattr(settings, name) for name in names}))"
+            ),
+        ],
+        cwd=Path.cwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
 
 
 @pytest.mark.parametrize(
@@ -480,6 +522,180 @@ def test_production_settings_accept_complete_profile():
     result = import_settings_with_env(VALID_PRODUCTION_ENV)
 
     assert result.returncode == 0
+
+
+def test_ordinary_lab_without_public_deployment_retains_local_behavior():
+    values = read_settings_with_env(
+        {
+            "SUPERSURF_ENVIRONMENT": "LAB",
+        },
+        "SUPERSURF_ENVIRONMENT",
+        "SUPERSURF_PUBLIC_DEPLOYMENT",
+        "DEBUG",
+        "SECURE_SSL_REDIRECT",
+        "SESSION_COOKIE_SECURE",
+        "CSRF_COOKIE_SECURE",
+    )
+
+    assert values == {
+        "SUPERSURF_ENVIRONMENT": "LAB",
+        "SUPERSURF_PUBLIC_DEPLOYMENT": False,
+        "DEBUG": True,
+        "SECURE_SSL_REDIRECT": False,
+        "SESSION_COOKIE_SECURE": False,
+        "CSRF_COOKIE_SECURE": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "missing_setting",
+    [
+        "DJANGO_SECRET_KEY",
+        "DATABASE_URL",
+        "DJANGO_ALLOWED_HOSTS",
+        "DJANGO_CSRF_TRUSTED_ORIGINS",
+        "DJANGO_DEBUG",
+    ],
+)
+def test_public_lab_settings_fail_when_required_setting_is_missing(missing_setting):
+    env = VALID_PUBLIC_LAB_ENV.copy()
+    env.pop(missing_setting)
+
+    result = import_settings_with_env(env)
+
+    assert result.returncode != 0
+    assert missing_setting in result.stderr
+
+
+def test_public_lab_settings_reject_development_secret():
+    env = VALID_PUBLIC_LAB_ENV | {"DJANGO_SECRET_KEY": "dev-only-insecure-supersurf-key"}
+    result = import_settings_with_env(env)
+
+    assert result.returncode != 0
+    assert "development fallback" in result.stderr
+
+
+def test_public_lab_settings_reject_debug_true():
+    env = VALID_PUBLIC_LAB_ENV | {"DJANGO_DEBUG": "true"}
+    result = import_settings_with_env(env)
+
+    assert result.returncode != 0
+    assert "DJANGO_DEBUG must be explicitly false" in result.stderr
+
+
+def test_public_lab_settings_enable_secure_public_flags_without_hsts_preload():
+    values = read_settings_with_env(
+        VALID_PUBLIC_LAB_ENV,
+        "SUPERSURF_ENVIRONMENT",
+        "SUPERSURF_PUBLIC_DEPLOYMENT",
+        "DEBUG",
+        "SECURE_SSL_REDIRECT",
+        "SESSION_COOKIE_SECURE",
+        "CSRF_COOKIE_SECURE",
+        "SECURE_PROXY_SSL_HEADER",
+        "SECURE_HSTS_SECONDS",
+        "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+        "SECURE_HSTS_PRELOAD",
+    )
+
+    assert values == {
+        "SUPERSURF_ENVIRONMENT": "LAB",
+        "SUPERSURF_PUBLIC_DEPLOYMENT": True,
+        "DEBUG": False,
+        "SECURE_SSL_REDIRECT": True,
+        "SESSION_COOKIE_SECURE": True,
+        "CSRF_COOKIE_SECURE": True,
+        "SECURE_PROXY_SSL_HEADER": ["HTTP_X_FORWARDED_PROTO", "https"],
+        "SECURE_HSTS_SECONDS": 0,
+        "SECURE_HSTS_INCLUDE_SUBDOMAINS": False,
+        "SECURE_HSTS_PRELOAD": False,
+    }
+
+
+def test_production_security_behavior_remains_intact():
+    values = read_settings_with_env(
+        VALID_PRODUCTION_ENV,
+        "SUPERSURF_ENVIRONMENT",
+        "SUPERSURF_PUBLIC_DEPLOYMENT",
+        "DEBUG",
+        "SECURE_SSL_REDIRECT",
+        "SESSION_COOKIE_SECURE",
+        "CSRF_COOKIE_SECURE",
+        "SECURE_PROXY_SSL_HEADER",
+        "SECURE_HSTS_SECONDS",
+        "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+        "SECURE_HSTS_PRELOAD",
+    )
+
+    assert values == {
+        "SUPERSURF_ENVIRONMENT": "PRODUCTION",
+        "SUPERSURF_PUBLIC_DEPLOYMENT": False,
+        "DEBUG": False,
+        "SECURE_SSL_REDIRECT": True,
+        "SESSION_COOKIE_SECURE": True,
+        "CSRF_COOKIE_SECURE": True,
+        "SECURE_PROXY_SSL_HEADER": ["HTTP_X_FORWARDED_PROTO", "https"],
+        "SECURE_HSTS_SECONDS": 31536000,
+        "SECURE_HSTS_INCLUDE_SUBDOMAINS": True,
+        "SECURE_HSTS_PRELOAD": True,
+    }
+
+
+def test_whitenoise_static_files_are_configured_after_security_middleware():
+    values = read_settings_with_env(
+        {},
+        "MIDDLEWARE",
+        "STORAGES",
+        "SUPERSURF_STATICFILES_MANIFEST",
+        "STATICFILES_USE_MANIFEST",
+        "WHITENOISE_MANIFEST_STRICT",
+    )
+
+    middleware = values["MIDDLEWARE"]
+    security_index = middleware.index("django.middleware.security.SecurityMiddleware")
+    whitenoise_index = middleware.index("whitenoise.middleware.WhiteNoiseMiddleware")
+    assert whitenoise_index == security_index + 1
+    assert (
+        values["STORAGES"]["staticfiles"]["BACKEND"]
+        == "whitenoise.storage.CompressedStaticFilesStorage"
+    )
+    assert values["SUPERSURF_STATICFILES_MANIFEST"] is False
+    assert values["STATICFILES_USE_MANIFEST"] is False
+    assert values["WHITENOISE_MANIFEST_STRICT"] is False
+
+
+def test_staticfiles_manifest_can_be_generated_without_public_deployment():
+    values = read_settings_with_env(
+        {"SUPERSURF_STATICFILES_MANIFEST": "true"},
+        "STORAGES",
+        "SUPERSURF_STATICFILES_MANIFEST",
+        "STATICFILES_USE_MANIFEST",
+        "WHITENOISE_MANIFEST_STRICT",
+    )
+
+    assert (
+        values["STORAGES"]["staticfiles"]["BACKEND"]
+        == "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    )
+    assert values["SUPERSURF_STATICFILES_MANIFEST"] is True
+    assert values["STATICFILES_USE_MANIFEST"] is True
+    assert values["WHITENOISE_MANIFEST_STRICT"] is False
+
+
+def test_public_lab_requires_strict_staticfiles_manifest():
+    values = read_settings_with_env(
+        VALID_PUBLIC_LAB_ENV,
+        "STORAGES",
+        "STATICFILES_USE_MANIFEST",
+        "WHITENOISE_MANIFEST_STRICT",
+    )
+
+    assert (
+        values["STORAGES"]["staticfiles"]["BACKEND"]
+        == "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    )
+    assert values["STATICFILES_USE_MANIFEST"] is True
+    assert values["WHITENOISE_MANIFEST_STRICT"] is True
 
 
 @pytest.mark.django_db

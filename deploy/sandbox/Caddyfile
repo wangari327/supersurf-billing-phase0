@@ -1,0 +1,23 @@
+(supersurf_headers) {
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		-Server
+	}
+	encode zstd gzip
+	reverse_proxy web:8000 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+sandbox.supersurf.co.ke {
+	import supersurf_headers
+}
+
+sandbox-api.supersurf.co.ke {
+	import supersurf_headers
+}

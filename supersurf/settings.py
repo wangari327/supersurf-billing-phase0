@@ -41,10 +41,13 @@ def environment_label() -> str:
 
 
 SUPERSURF_ENVIRONMENT = environment_label()
+SUPERSURF_PUBLIC_DEPLOYMENT = env_bool("SUPERSURF_PUBLIC_DEPLOYMENT", default=False)
+SECURE_PUBLIC_DEPLOYMENT = SUPERSURF_ENVIRONMENT == "PRODUCTION" or SUPERSURF_PUBLIC_DEPLOYMENT
+SUPERSURF_STATICFILES_MANIFEST = env_bool("SUPERSURF_STATICFILES_MANIFEST", default=False)
 
 
-def validate_production_environment() -> None:
-    if SUPERSURF_ENVIRONMENT != "PRODUCTION":
+def validate_public_deployment_environment() -> None:
+    if not SECURE_PUBLIC_DEPLOYMENT:
         return
 
     required = [
@@ -68,14 +71,14 @@ def validate_production_environment() -> None:
         raise ImproperlyConfigured(msg)
 
 
-validate_production_environment()
+validate_public_deployment_environment()
 
 
 def database_config() -> dict[str, object]:
     database_url = env("DATABASE_URL")
     if not database_url:
-        if SUPERSURF_ENVIRONMENT == "PRODUCTION":
-            msg = "DATABASE_URL must be supplied in production."
+        if SECURE_PUBLIC_DEPLOYMENT:
+            msg = "DATABASE_URL must be supplied for public deployments."
             raise ImproperlyConfigured(msg)
         return {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 
@@ -96,13 +99,13 @@ def database_config() -> dict[str, object]:
 
 SECRET_KEY = (
     env("DJANGO_SECRET_KEY")
-    if SUPERSURF_ENVIRONMENT == "PRODUCTION"
+    if SECURE_PUBLIC_DEPLOYMENT
     else env("DJANGO_SECRET_KEY", DEVELOPMENT_SECRET_KEY)
 )
-DEBUG = env_bool("DJANGO_DEBUG", default=SUPERSURF_ENVIRONMENT != "PRODUCTION")
+DEBUG = env_bool("DJANGO_DEBUG", default=not SECURE_PUBLIC_DEPLOYMENT)
 ALLOWED_HOSTS = env_list(
     "DJANGO_ALLOWED_HOSTS",
-    "" if SUPERSURF_ENVIRONMENT == "PRODUCTION" else "localhost,127.0.0.1",
+    "" if SECURE_PUBLIC_DEPLOYMENT else "localhost,127.0.0.1",
 )
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 
@@ -127,6 +130,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "audit.middleware.CorrelationIdMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -175,6 +179,19 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+STATICFILES_USE_MANIFEST = SECURE_PUBLIC_DEPLOYMENT or SUPERSURF_STATICFILES_MANIFEST
+STATICFILES_STORAGE_BACKEND = (
+    "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    if STATICFILES_USE_MANIFEST
+    else "whitenoise.storage.CompressedStaticFilesStorage"
+)
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": STATICFILES_STORAGE_BACKEND,
+    },
+}
+WHITENOISE_MANIFEST_STRICT = SECURE_PUBLIC_DEPLOYMENT
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "users.User"
@@ -204,19 +221,27 @@ CELERY_TASK_EAGER_PROPAGATES = True
 
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
+SECURE_PROXY_SSL_HEADER: tuple[str, str] | None
 
-if SUPERSURF_ENVIRONMENT == "PRODUCTION":
+if SECURE_PUBLIC_DEPLOYMENT:
     DEBUG = False
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = int(env("SECURE_HSTS_SECONDS", "31536000"))
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    if SUPERSURF_ENVIRONMENT == "PRODUCTION":
+        SECURE_HSTS_SECONDS = int(env("SECURE_HSTS_SECONDS", "31536000"))
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+        SECURE_HSTS_PRELOAD = True
+    else:
+        SECURE_HSTS_SECONDS = int(env("SECURE_HSTS_SECONDS", "0"))
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+        SECURE_HSTS_PRELOAD = False
 else:
     SECURE_SSL_REDIRECT = False
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
+    SECURE_PROXY_SSL_HEADER = None
     SECURE_HSTS_SECONDS = 0
     SECURE_HSTS_INCLUDE_SUBDOMAINS = False
     SECURE_HSTS_PRELOAD = False

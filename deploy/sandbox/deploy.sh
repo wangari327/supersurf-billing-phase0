@@ -44,10 +44,34 @@ check_domain_dns sandbox.supersurf.co.ke
 check_domain_dns sandbox-api.supersurf.co.ke
 
 install -m 0640 "${SCRIPT_DIR}/compose.yml" "${CURRENT_DIR}/compose.yml"
-install -m 0640 "${SCRIPT_DIR}/Caddyfile" "${CURRENT_DIR}/Caddyfile"
+install -m 0644 "${SCRIPT_DIR}/Caddyfile" "${CURRENT_DIR}/Caddyfile"
 for helper in common.sh rollback.sh create-owner.sh status.sh logs.sh; do
   install -m 0750 "${SCRIPT_DIR}/${helper}" "${CURRENT_DIR}/${helper}"
 done
+
+validate_caddyfile() {
+  local caddyfile="${CURRENT_DIR}/Caddyfile"
+  if [ ! -f "${caddyfile}" ]; then
+    echo "Missing deployed Caddyfile: ${caddyfile}" >&2
+    exit 1
+  fi
+  local mode
+  mode="$(stat -c '%a' "${caddyfile}")"
+  if [ "${mode}" != "644" ]; then
+    echo "Deployed Caddyfile must have mode 644, found ${mode}." >&2
+    exit 1
+  fi
+  if grep -Eiq '(secret|password|token|credential|consumer[_-]?key|consumer[_-]?secret|passkey|authorization)' "${caddyfile}"; then
+    echo "Deployed Caddyfile appears to contain secret material." >&2
+    exit 1
+  fi
+  compose_cmd run --rm --no-deps caddy \
+    validate \
+    --config /etc/caddy/Caddyfile \
+    --adapter caddyfile
+}
+
+validate_caddyfile
 
 echo "Building supersurf-billing:${DEPLOY_SHA}"
 docker_cmd build --pull --tag "supersurf-billing:${DEPLOY_SHA}" "${REPO_ROOT}"

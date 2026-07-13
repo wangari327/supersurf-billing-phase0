@@ -7,6 +7,14 @@ CADDYFILE_0644_INSTALL = 'install -m 0644 "${SCRIPT_DIR}/Caddyfile" "${CURRENT_D
 CADDYFILE_0640_INSTALL = 'install -m 0640 "${SCRIPT_DIR}/Caddyfile" "${CURRENT_DIR}/Caddyfile"'
 COMPOSE_0640_INSTALL = 'install -m 0640 "${SCRIPT_DIR}/compose.yml" "${CURRENT_DIR}/compose.yml"'
 HELPER_0750_INSTALL = 'install -m 0750 "${SCRIPT_DIR}/${helper}" "${CURRENT_DIR}/${helper}"'
+CADDY_VALIDATE_COMMAND = """compose_cmd run --rm --no-deps caddy \\
+    caddy validate \\
+    --config /etc/caddy/Caddyfile \\
+    --adapter caddyfile"""
+BROKEN_CADDY_VALIDATE_COMMAND = """compose_cmd run --rm --no-deps caddy \\
+    validate \\
+    --config /etc/caddy/Caddyfile \\
+    --adapter caddyfile"""
 
 
 def test_sandbox_deploy_installs_caddyfile_world_readable_but_not_writable():
@@ -26,9 +34,7 @@ def test_sandbox_caddy_validation_uses_actual_read_only_compose_mount_before_sta
     assert 'mode="$(stat -c \'%a\' "${caddyfile}")"' in deploy_script
     assert 'if [ "${mode}" != "644" ]; then' in deploy_script
     assert "appears to contain secret material" in deploy_script
-    assert "compose_cmd run --rm --no-deps caddy" in deploy_script
-    assert "validate" in deploy_script
-    assert "--config /etc/caddy/Caddyfile" in deploy_script
-    assert "--adapter caddyfile" in deploy_script
+    assert CADDY_VALIDATE_COMMAND in deploy_script
+    assert BROKEN_CADDY_VALIDATE_COMMAND not in deploy_script
     validation_call = deploy_script.index("\nvalidate_caddyfile\n")
     assert validation_call < deploy_script.index("compose_cmd up -d caddy")

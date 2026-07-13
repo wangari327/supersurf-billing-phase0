@@ -66,7 +66,7 @@ validate_caddyfile() {
     exit 1
   fi
   compose_cmd run --rm --no-deps caddy \
-    validate \
+    caddy validate \
     --config /etc/caddy/Caddyfile \
     --adapter caddyfile
 }

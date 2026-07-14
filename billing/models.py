@@ -1250,6 +1250,183 @@ class BillingCharge(models.Model):
             )
 
 
+class MpesaCallbackEventQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "MpesaCallbackEvent records cannot be updated through application code."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "MpesaCallbackEvent records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "MpesaCallbackEvent records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+
+class MpesaCallbackEventManager(models.Manager):
+    def get_queryset(self):
+        return MpesaCallbackEventQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "MpesaCallbackEvent records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class MpesaCallbackEvent(models.Model):
+    EVENT_C2B_VALIDATION = "c2b_validation"
+    EVENT_C2B_CONFIRMATION = "c2b_confirmation"
+    EVENT_STK_RESULT = "stk_result"
+    EVENT_TYPE_CHOICES = [
+        (EVENT_C2B_VALIDATION, "C2B validation"),
+        (EVENT_C2B_CONFIRMATION, "C2B confirmation"),
+        (EVENT_STK_RESULT, "STK result"),
+    ]
+    IMMUTABLE_FIELDS = (
+        "event_type",
+        "payload_sha256",
+        "idempotency_key",
+        "sanitized_payload",
+        "provider_transaction_id",
+        "merchant_request_id",
+        "checkout_request_id",
+        "account_reference",
+        "amount",
+        "result_code",
+        "result_description",
+        "received_at",
+        "created_at",
+    )
+    IMMUTABLE_UPDATE_FIELDS = frozenset(IMMUTABLE_FIELDS)
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event_type = models.CharField(max_length=24, choices=EVENT_TYPE_CHOICES)
+    payload_sha256 = models.CharField(max_length=64)
+    idempotency_key = models.CharField(max_length=160, unique=True)
+    sanitized_payload = models.JSONField()
+    provider_transaction_id = models.CharField(max_length=128, blank=True)
+    merchant_request_id = models.CharField(max_length=128, blank=True)
+    checkout_request_id = models.CharField(max_length=128, blank=True)
+    account_reference = models.CharField(max_length=64, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    result_code = models.CharField(max_length=16, blank=True)
+    result_description = models.CharField(max_length=240, blank=True)
+    received_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = MpesaCallbackEventManager()
+
+    class Meta:
+        verbose_name = "M-PESA callback event"
+        verbose_name_plural = "M-PESA callback events"
+        ordering = ["-received_at", "-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["event_type", "received_at"], name="mpesa_cb_event_type_recv_idx"),
+            models.Index(fields=["provider_transaction_id"], name="mpesa_cb_provider_tx_idx"),
+            models.Index(fields=["merchant_request_id"], name="mpesa_cb_merchant_req_idx"),
+            models.Index(fields=["checkout_request_id"], name="mpesa_cb_checkout_req_idx"),
+            models.Index(fields=["account_reference"], name="mpesa_cb_account_ref_idx"),
+            models.Index(fields=["result_code"], name="mpesa_cb_result_code_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(
+                    event_type__in=[
+                        "c2b_validation",
+                        "c2b_confirmation",
+                        "stk_result",
+                    ]
+                ),
+                name="mpesa_callback_event_type_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(payload_sha256__regex=r"^[0-9a-f]{64}$"),
+                name="mpesa_callback_payload_sha256_hex",
+            ),
+            models.CheckConstraint(
+                condition=~Q(idempotency_key=""),
+                name="mpesa_callback_idempotency_nonblank",
+            ),
+            models.CheckConstraint(
+                condition=Q(amount__isnull=True) | Q(amount__gt=0),
+                name="mpesa_callback_amount_positive",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.event_type} {self.payload_sha256[:12]}"
+
+    def save(self, *args, **kwargs) -> None:
+        self._reject_protected_changes(update_fields=kwargs.get("update_fields"))
+        self.full_clean(validate_unique=False)
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        self.payload_sha256 = self.payload_sha256.strip().lower()
+        self.idempotency_key = self.idempotency_key.strip()
+        self.provider_transaction_id = self._clean_optional(self.provider_transaction_id)
+        self.merchant_request_id = self._clean_optional(self.merchant_request_id)
+        self.checkout_request_id = self._clean_optional(self.checkout_request_id)
+        self.account_reference = self._clean_optional(self.account_reference)
+        self.result_code = self._clean_optional(self.result_code)
+        self.result_description = self._clean_optional(self.result_description)
+        if self.event_type not in {
+            self.EVENT_C2B_VALIDATION,
+            self.EVENT_C2B_CONFIRMATION,
+            self.EVENT_STK_RESULT,
+        }:
+            raise ValidationError({"event_type": "Callback event type is not valid."})
+        if not re.fullmatch(r"[0-9a-f]{64}", self.payload_sha256):
+            raise ValidationError({"payload_sha256": "Payload digest must be SHA-256 hex."})
+        if not self.idempotency_key:
+            raise ValidationError({"idempotency_key": "Idempotency key is required."})
+        if self.amount is not None and self.amount <= 0:
+            raise ValidationError({"amount": "Callback amount must be greater than zero."})
+        if self.received_at and timezone.is_naive(self.received_at):
+            raise ValidationError({"received_at": "Received time must be timezone-aware."})
+        if self.created_at and timezone.is_naive(self.created_at):
+            raise ValidationError({"created_at": "Created time must be timezone-aware."})
+
+    def delete(self, *args, **kwargs) -> None:
+        msg = "MpesaCallbackEvent records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    @staticmethod
+    def _clean_optional(value: str | None) -> str:
+        if value is None:
+            return ""
+        cleaned = str(value).strip()
+        return cleaned
+
+    def _reject_protected_changes(self, update_fields=None) -> None:
+        if not self.pk:
+            return
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(
+                self.IMMUTABLE_UPDATE_FIELDS
+            )
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(
+                    f"MpesaCallbackEvent fields cannot be changed after creation: {names}."
+                )
+        try:
+            current = type(self).objects.get(pk=self.pk)
+        except type(self).DoesNotExist:
+            return
+        changed = [
+            field
+            for field in self.IMMUTABLE_FIELDS
+            if getattr(current, field) != getattr(self, field)
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(
+                f"MpesaCallbackEvent fields cannot be changed after creation: {names}."
+            )
+
+
 class PaymentProviderProfile(models.Model):
     PROVIDER_FAKE = "fake"
     PROVIDER_MPESA = "mpesa"

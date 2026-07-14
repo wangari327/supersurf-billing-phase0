@@ -24,6 +24,9 @@
             {% if perms.billing.view_payment %}
               <a class="btn" href="{% url 'payment_list' %}">Payments</a>
             {% endif %}
+            {% if perms.billing.view_mpesacallbackevent %}
+              <a class="btn" href="{% url 'mpesa_callback_event_list' %}">M-PESA Callbacks</a>
+            {% endif %}
             {% if perms.core.change_organization %}
               <a class="btn" href="{% url 'organization_settings' %}">SuperSurf Settings</a>
             {% endif %}

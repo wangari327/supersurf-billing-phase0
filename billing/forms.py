@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 
 from subscribers.models import Subscriber
 
-from .models import MAX_MONEY_MINOR, LedgerEntry, PaymentProviderProfile, Plan
+from .models import MAX_MONEY_MINOR, LedgerEntry, MpesaCallbackEvent, PaymentProviderProfile, Plan
 from .money import ksh_to_minor_units, minor_units_to_ksh
 
 
@@ -256,6 +256,41 @@ class PaymentSearchForm(forms.Form):
             "environment",
             "name",
         )
+
+
+class MpesaCallbackEventSearchForm(forms.Form):
+    q = forms.CharField(
+        required=False,
+        label="Search",
+        widget=forms.TextInput(
+            attrs={
+                "class": "field",
+                "placeholder": "Transaction, CheckoutRequestID, MerchantRequestID, or reference",
+            }
+        ),
+    )
+    event_type = forms.ChoiceField(
+        required=False,
+        label="Event type",
+        choices=[("", "All"), *MpesaCallbackEvent.EVENT_TYPE_CHOICES],
+        widget=forms.Select(attrs={"class": "field"}),
+    )
+    result_code = forms.CharField(
+        required=False,
+        label="Result code",
+        max_length=16,
+        widget=forms.TextInput(attrs={"class": "field"}),
+    )
+    date_from = forms.DateField(
+        required=False,
+        label="From",
+        widget=forms.DateInput(attrs={"class": "field", "type": "date"}),
+    )
+    date_to = forms.DateField(
+        required=False,
+        label="To",
+        widget=forms.DateInput(attrs={"class": "field", "type": "date"}),
+    )
 
 
 class FakePaymentIngestionForm(forms.Form):

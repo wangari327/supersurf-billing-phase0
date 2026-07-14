@@ -44,6 +44,12 @@ SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+MPESA_CALLBACK_PATH_PATTERN = re.compile(
+    r"(?P<prefix>/api/integrations/mpesa/)[^/\s?#]+"
+    r"(?P<suffix>/(?:c2b/(?:validation|confirmation)|stk/callback)/?)",
+    re.IGNORECASE,
+)
+
 
 def is_sensitive_key(key: str) -> bool:
     lowered = key.lower().replace("-", "_")
@@ -55,6 +61,10 @@ def redact_text(value: str) -> str:
         scheme = match.group("scheme") or ""
         return f"{match.group('key')}{match.group('separator')}{scheme}[redacted]"
 
+    value = MPESA_CALLBACK_PATH_PATTERN.sub(
+        r"\g<prefix>[redacted]\g<suffix>",
+        value,
+    )
     return SENSITIVE_ASSIGNMENT_PATTERN.sub(replace, value)
 
 

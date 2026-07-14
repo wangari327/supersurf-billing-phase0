@@ -44,6 +44,11 @@ SUPERSURF_ENVIRONMENT = environment_label()
 SUPERSURF_PUBLIC_DEPLOYMENT = env_bool("SUPERSURF_PUBLIC_DEPLOYMENT", default=False)
 SECURE_PUBLIC_DEPLOYMENT = SUPERSURF_ENVIRONMENT == "PRODUCTION" or SUPERSURF_PUBLIC_DEPLOYMENT
 SUPERSURF_STATICFILES_MANIFEST = env_bool("SUPERSURF_STATICFILES_MANIFEST", default=False)
+MPESA_CALLBACK_TOKEN = env("MPESA_CALLBACK_TOKEN").strip()
+MPESA_CALLBACK_BASE_URL = env(
+    "MPESA_CALLBACK_BASE_URL",
+    "https://sandbox-api.supersurf.co.ke",
+).rstrip("/")
 
 
 def validate_public_deployment_environment() -> None:
@@ -57,6 +62,8 @@ def validate_public_deployment_environment() -> None:
         "DJANGO_CSRF_TRUSTED_ORIGINS",
         "DJANGO_DEBUG",
     ]
+    if SUPERSURF_ENVIRONMENT == "LAB" and SUPERSURF_PUBLIC_DEPLOYMENT:
+        required.append("MPESA_CALLBACK_TOKEN")
     missing = [name for name in required if not env(name).strip()]
     if missing:
         msg = "Missing required production setting(s): " + ", ".join(missing)
@@ -68,6 +75,14 @@ def validate_public_deployment_environment() -> None:
 
     if env("DJANGO_DEBUG").strip().lower() not in FALSE_VALUES:
         msg = "DJANGO_DEBUG must be explicitly false in production."
+        raise ImproperlyConfigured(msg)
+
+    if (
+        SUPERSURF_ENVIRONMENT == "LAB"
+        and SUPERSURF_PUBLIC_DEPLOYMENT
+        and len(MPESA_CALLBACK_TOKEN) < 32
+    ):
+        msg = "MPESA_CALLBACK_TOKEN must be at least 32 characters for public LAB."
         raise ImproperlyConfigured(msg)
 
 

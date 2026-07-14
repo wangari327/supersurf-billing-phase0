@@ -21,7 +21,7 @@ Used by automated tests and CI. Must not require production credentials.
 
 Reserved for later network and payment lab work. Lab routers and sandbox payment profiles must remain visibly separate from production.
 
-Ordinary `LAB` without `SUPERSURF_PUBLIC_DEPLOYMENT=true` keeps local-development behavior. Public sandbox deployments use `SUPERSURF_ENVIRONMENT=LAB` plus `SUPERSURF_PUBLIC_DEPLOYMENT=true`; this keeps the visible banner labelled LAB while requiring production-style secret, PostgreSQL, host, CSRF, debug, secure-cookie, SSL-redirect, and proxy-header settings. Public LAB defaults HSTS to `0` and does not enable preload or includeSubDomains.
+Ordinary `LAB` without `SUPERSURF_PUBLIC_DEPLOYMENT=true` keeps local-development behavior. Public sandbox deployments use `SUPERSURF_ENVIRONMENT=LAB` plus `SUPERSURF_PUBLIC_DEPLOYMENT=true`; this keeps the visible banner labelled LAB while requiring production-style secret, PostgreSQL, host, CSRF, debug, secure-cookie, SSL-redirect, proxy-header, and M-PESA callback-token settings. Public LAB defaults HSTS to `0` and does not enable preload or includeSubDomains.
 
 Container builds may set `SUPERSURF_STATICFILES_MANIFEST=true` to generate the WhiteNoise static-file manifest without turning the build environment into a public deployment. Runtime public deployments still require `SUPERSURF_PUBLIC_DEPLOYMENT=true` or `SUPERSURF_ENVIRONMENT=PRODUCTION`.
 

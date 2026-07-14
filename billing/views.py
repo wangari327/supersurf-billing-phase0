@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import logging
+import secrets
 from datetime import datetime, time
+from typing import Never
 
 from django.conf import settings
 from django.contrib import messages
@@ -8,9 +12,10 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Exists, OuterRef, Q
-from django.http import HttpResponseNotAllowed
+from django.http import HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 
 from subscribers.models import Service, Subscriber
 
@@ -18,6 +23,7 @@ from .forms import (
     BillingPeriodActionForm,
     FakePaymentIngestionForm,
     LedgerReversalForm,
+    MpesaCallbackEventSearchForm,
     PackageSearchForm,
     PaymentSearchForm,
     PlanForm,
@@ -29,6 +35,7 @@ from .models import (
     BillingCharge,
     BillingPeriod,
     LedgerEntry,
+    MpesaCallbackEvent,
     Payment,
     PaymentAllocation,
     Plan,
@@ -36,6 +43,7 @@ from .models import (
     UnmatchedPaymentCase,
     Wallet,
 )
+from .mpesa_callbacks import MAX_CALLBACK_BODY_BYTES, capture_mpesa_callback
 from .services import (
     activate_billing_period,
     activate_service_from_wallet,
@@ -53,6 +61,89 @@ from .services import (
     set_package_active,
     update_package,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _json_error(code: str, status: int) -> JsonResponse:
+    return JsonResponse({"error": code}, status=status)
+
+
+def _configured_callback_token() -> str:
+    return settings.MPESA_CALLBACK_TOKEN.strip()
+
+
+def _valid_callback_token(token: str) -> bool:
+    configured = _configured_callback_token()
+    return len(configured) >= 32 and secrets.compare_digest(token, configured)
+
+
+def _request_body_too_large(request) -> bool:
+    content_length = request.META.get("CONTENT_LENGTH", "")
+    if content_length:
+        try:
+            if int(content_length) > MAX_CALLBACK_BODY_BYTES:
+                return True
+        except ValueError:
+            return False
+    return len(request.body) > MAX_CALLBACK_BODY_BYTES
+
+
+def _mpesa_ack(event_type: str) -> JsonResponse:
+    if event_type in {
+        MpesaCallbackEvent.EVENT_C2B_VALIDATION,
+        MpesaCallbackEvent.EVENT_C2B_CONFIRMATION,
+    }:
+        return JsonResponse({"ResultCode": 0, "ResultDesc": "Accepted"})
+    return JsonResponse({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+
+def _reject_non_json_constant(value: str) -> Never:
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
+@csrf_exempt
+def mpesa_missing_token(request, *args, **kwargs):
+    return _json_error("not_found", 404)
+
+
+@csrf_exempt
+def mpesa_c2b_validation_callback(request, token: str):
+    return _mpesa_callback(request, token, MpesaCallbackEvent.EVENT_C2B_VALIDATION)
+
+
+@csrf_exempt
+def mpesa_c2b_confirmation_callback(request, token: str):
+    return _mpesa_callback(request, token, MpesaCallbackEvent.EVENT_C2B_CONFIRMATION)
+
+
+@csrf_exempt
+def mpesa_stk_callback(request, token: str):
+    return _mpesa_callback(request, token, MpesaCallbackEvent.EVENT_STK_RESULT)
+
+
+def _mpesa_callback(request, token: str, event_type: str) -> JsonResponse:
+    if request.method != "POST":
+        response = _json_error("method_not_allowed", 405)
+        response["Allow"] = "POST"
+        return response
+    if not _valid_callback_token(token):
+        return _json_error("not_found", 404)
+    if _request_body_too_large(request):
+        return _json_error("request_entity_too_large", 413)
+    try:
+        payload = json.loads(
+            request.body.decode("utf-8"),
+            parse_constant=_reject_non_json_constant,
+        )
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return _json_error("malformed_json", 400)
+    try:
+        capture_mpesa_callback(event_type, payload)
+    except Exception:
+        logger.exception("mpesa_callback_capture_failed event_type=%s", event_type)
+        return _json_error("callback_capture_failed", 500)
+    return _mpesa_ack(event_type)
 
 
 @login_required
@@ -446,6 +537,69 @@ def billing_period_history(request, service_pk):
 
 def _end_of_day(value):
     return timezone.make_aware(datetime.combine(value, time.max))
+
+
+@login_required
+@permission_required("billing.view_mpesacallbackevent", raise_exception=True)
+def mpesa_callback_event_list(request):
+    form = MpesaCallbackEventSearchForm(request.GET)
+    events = MpesaCallbackEvent.objects.all()
+    query = ""
+    event_type = ""
+    result_code = ""
+    date_from = None
+    date_to = None
+    if form.is_valid():
+        query = form.cleaned_data["q"].strip()
+        event_type = form.cleaned_data["event_type"]
+        result_code = form.cleaned_data["result_code"].strip()
+        date_from = form.cleaned_data["date_from"]
+        date_to = form.cleaned_data["date_to"]
+        if query:
+            events = events.filter(
+                Q(provider_transaction_id__icontains=query)
+                | Q(checkout_request_id__icontains=query)
+                | Q(merchant_request_id__icontains=query)
+                | Q(account_reference__icontains=query)
+            )
+        if event_type:
+            events = events.filter(event_type=event_type)
+        if result_code:
+            events = events.filter(result_code__iexact=result_code)
+        if date_from is not None:
+            events = events.filter(received_at__date__gte=date_from)
+        if date_to is not None:
+            events = events.filter(received_at__lte=_end_of_day(date_to))
+    paginator = Paginator(events, 20)
+    page = paginator.get_page(request.GET.get("page"))
+    return render(
+        request,
+        "billing/mpesa_callback_event_list.html",
+        {
+            "form": form,
+            "page": page,
+            "query": query,
+            "event_type": event_type,
+            "result_code": result_code,
+            "date_from": date_from,
+            "date_to": date_to,
+        },
+    )
+
+
+@login_required
+@permission_required("billing.view_mpesacallbackevent", raise_exception=True)
+def mpesa_callback_event_detail(request, pk):
+    event = get_object_or_404(MpesaCallbackEvent, pk=pk)
+    sanitized_payload_json = json.dumps(event.sanitized_payload, indent=2, sort_keys=True)
+    return render(
+        request,
+        "billing/mpesa_callback_event_detail.html",
+        {
+            "event": event,
+            "sanitized_payload_json": sanitized_payload_json,
+        },
+    )
 
 
 ALLOCATION_DETAIL_PERMISSIONS = (

@@ -2,7 +2,7 @@
 
 ## Supported Status
 
-This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, the Phase 6 wallet ledger foundation, Phase 7 Wallet-funded activation and renewal charges, and the Phase 8 canonical payment foundation. It is not production-ready for real provider payment integrations, RADIUS, or RouterOS operations.
+This repository includes the Phase 1 foundation runtime, Phase 2 package catalog, Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, the Phase 6 wallet ledger foundation, Phase 7 Wallet-funded activation and renewal charges, the Phase 8 canonical payment foundation, and Phase 9 Daraja sandbox callback evidence capture. It is not production-ready for real provider payment integrations, RADIUS, or RouterOS operations.
 
 Security requirements in this document are binding for later phases unless explicitly superseded by a reviewed ADR.
 
@@ -28,6 +28,7 @@ Security requirements in this document are binding for later phases unless expli
 - Phase 6 audited manual wallet credits, manual wallet debits, and reversal workflows with append-only ledger entries
 - Phase 7 audited Wallet-funded activation and renewal charge workflows with immutable billing charges
 - Phase 8 fake-provider payment ingestion, immutable canonical payments, Wallet payment credits, and unmatched-payment resolution
+- Phase 9 Daraja sandbox callback receivers with append-only sanitized callback evidence
 
 ## Package Catalog Security
 
@@ -111,6 +112,22 @@ Payment audit metadata must not store operation IDs, raw request payloads, full 
 
 Administrator and Finance can ingest fake payments and resolve unmatched cases. SuperSurf Support and Read Only can view payment, allocation, and unmatched-case records because they have the supporting view permissions. NOC receives no payment permissions. No ordinary role receives payment, allocation, or unmatched-case delete permissions, and ordinary roles do not receive change permissions for `Payment` or `PaymentAllocation`.
 
+## Daraja Callback Evidence Security
+
+Phase 9 callback receivers are inbound evidence capture only. They prove Daraja sandbox reachability, callback shape, acknowledgement behavior, redaction, hashing, and idempotency before a later provider-specific adapter is allowed to create canonical payments.
+
+Callback URLs use `MPESA_CALLBACK_TOKEN` as an unguessable path segment because Daraja callbacks cannot be assumed to include a custom authentication header. The token is required for public LAB, must be at least 32 characters, is generated only into the VPS `sandbox.env` when absent, is preserved on later deployments, and must not be committed, printed by deployment, pasted into logs, or included in screenshots or tickets. Incorrect or missing tokens return HTTP 404.
+
+`MpesaCallbackEvent` records store an event type, canonical payload SHA-256 digest, unique idempotency key, sanitized JSON payload, safe extracted provider identifiers, optional amount, optional result code, optional bounded result description, received timestamp, and creation timestamp. They do not store raw request bodies, request headers, cookies, client IP addresses, browser sessions, callback tokens, full phone numbers, customer names, credentials, secrets, or balances.
+
+Sanitization recursively redacts values for sensitive keys such as phone, MSISDN, customer-name parts, balances, credentials, passwords, passkeys, secrets, tokens, and authorization fields while preserving safe provider identifiers such as `TransID`, `MpesaReceiptNumber`, `BillRefNumber`, `AccountReference`, `MerchantRequestID`, and `CheckoutRequestID`.
+
+`MpesaCallbackEvent` records are append-only in application code. Model save changes, queryset updates, bulk updates, model deletes, and queryset deletes are rejected. The database enforces unique idempotency keys, lowercase 64-character SHA-256 digests, valid event types, and positive amounts when present. Direct database access remains outside these application controls.
+
+`billing.view_mpesacallbackevent` exposes only read-only list/detail pages and sanitized payloads. Administrator and Finance receive that permission; Support, Read Only, and NOC do not. No ordinary role receives add, change, or delete permissions for callback events.
+
+Phase 9 callbacks do not create `Payment` records, Wallet credits, ledger entries, billing periods, billing charges, invoices, receipts, renewals, service activation, RADIUS records, PPPoE credentials, RouterOS calls, provisioning jobs, or network actions.
+
 ## Audit Immutability Boundary
 
 Phase 1.1 rejects application-level `AuditEvent` instance updates, deletes, queryset `update()`, queryset `delete()`, and `bulk_update()`. The Django admin is read-only for audit events.
@@ -124,6 +141,7 @@ Sensitive values include:
 - M-PESA consumer keys and consumer secrets
 - Daraja OAuth tokens
 - Callback validation secrets
+- M-PESA callback URL tokens
 - RouterOS usernames, passwords, certificates, and private keys
 - RADIUS shared secrets
 - WireGuard private keys
@@ -163,11 +181,11 @@ Sensitive values must not appear in logs, URLs, screenshots, support notes, ordi
 
 ## Payment Security
 
-Future M-PESA callbacks must be persisted before business processing. Duplicate callbacks must not double-credit. Invalid callbacks must credit nothing. Reversals must create compensating ledger entries rather than deleting history.
+M-PESA callbacks must be persisted as sanitized evidence before business processing. Duplicate callbacks must not double-credit. Invalid callbacks must credit nothing. Reversals must create compensating ledger entries rather than deleting history.
 
 Future Till payments must not be matched by amount alone.
 
-Real M-PESA implementation has not begun. It is blocked until sandbox evidence is collected in `docs/research/mpesa-sandbox-evidence-checklist.md`. Phase 8 provides only the fake-provider intake path and canonical payment records that a later thin M-PESA adapter may call.
+Real outbound M-PESA implementation has not begun. Phase 9 captures sandbox evidence only and remains blocked from payment creation until evidence is reviewed in `docs/research/mpesa-sandbox-evidence-checklist.md`. Phase 8 provides only the fake-provider intake path and canonical payment records that a later thin M-PESA adapter may call.
 
 ## Network Safety
 

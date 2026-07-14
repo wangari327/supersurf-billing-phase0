@@ -5,6 +5,46 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path(
+        "api/integrations/mpesa/c2b/validation/",
+        views.mpesa_missing_token,
+        name="mpesa_c2b_validation_missing_token",
+    ),
+    path(
+        "api/integrations/mpesa/c2b/confirmation/",
+        views.mpesa_missing_token,
+        name="mpesa_c2b_confirmation_missing_token",
+    ),
+    path(
+        "api/integrations/mpesa/stk/callback/",
+        views.mpesa_missing_token,
+        name="mpesa_stk_callback_missing_token",
+    ),
+    path(
+        "api/integrations/mpesa/<str:token>/c2b/validation/",
+        views.mpesa_c2b_validation_callback,
+        name="mpesa_c2b_validation_callback",
+    ),
+    path(
+        "api/integrations/mpesa/<str:token>/c2b/confirmation/",
+        views.mpesa_c2b_confirmation_callback,
+        name="mpesa_c2b_confirmation_callback",
+    ),
+    path(
+        "api/integrations/mpesa/<str:token>/stk/callback/",
+        views.mpesa_stk_callback,
+        name="mpesa_stk_callback",
+    ),
+    path(
+        "mpesa-callbacks/",
+        views.mpesa_callback_event_list,
+        name="mpesa_callback_event_list",
+    ),
+    path(
+        "mpesa-callbacks/<uuid:pk>/",
+        views.mpesa_callback_event_detail,
+        name="mpesa_callback_event_detail",
+    ),
     path("payments/", views.payment_list, name="payment_list"),
     path("payments/fake/new/", views.fake_payment_create, name="fake_payment_create"),
     path("payments/<uuid:pk>/", views.payment_detail, name="payment_detail"),

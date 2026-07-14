@@ -98,6 +98,7 @@ On the development machine, the Playwright browser download timed out, so the sm
 Local development may use SQLite when `DATABASE_URL` is absent. SQLite is fast for ordinary model, form, permission, and view tests, but it does not prove PostgreSQL row-lock ordering or blocking behavior.
 
 GitHub Actions runs PostgreSQL 17 with empty test-only credentials and sets `DATABASE_URL` for clean migrations, Django checks, deployment checks, and the full pytest suite. Treat the PostgreSQL CI run as authoritative for subscription locking, billing-period concurrency, wallet-ledger concurrency, competing Wallet-funded charge behavior, duplicate provider payment callbacks, payment-credit ledger sequencing, concurrent unmatched-payment resolution, payment visibility permission boundaries, and payment provider transaction database constraints.
+Phase 9 adds PostgreSQL duplicate-callback evidence checks for `MpesaCallbackEvent`; SQLite local tests cover ordinary callback behavior and skip only the PostgreSQL concurrency case.
 
 To run the same profile locally, start PostgreSQL and set a test database URL before invoking Django commands:
 
@@ -107,3 +108,5 @@ uv run python manage.py migrate
 uv run python manage.py check
 uv run pytest
 ```
+
+Public LAB deployment checks also require a dummy `MPESA_CALLBACK_TOKEN` of at least 32 characters. Never use a real sandbox token in CI logs or checked-in test snippets.

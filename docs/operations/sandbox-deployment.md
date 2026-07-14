@@ -1,6 +1,6 @@
 # Sandbox Deployment
 
-This document describes the SuperSurf sandbox deployment foundation. It is sandbox infrastructure, not production infrastructure. Phase 9 is not implemented. M-PESA is not implemented. Daraja callbacks are not implemented. No production payment credentials should be stored here.
+This document describes the SuperSurf sandbox deployment foundation. It is sandbox infrastructure, not production infrastructure. Phase 9 adds inbound Daraja sandbox callback evidence capture only. It does not create canonical payments, Wallet credits, billing periods, renewals, invoices, receipts, network access, or production Daraja integrations. No production payment credentials should be stored here.
 
 ## Purpose And Scope
 
@@ -9,7 +9,7 @@ The sandbox publishes the existing Phase 8 Django application at:
 - `https://sandbox.supersurf.co.ke/`
 - `https://sandbox-api.supersurf.co.ke/`
 
-Both hostnames reverse proxy to the same Django web service. The second hostname is reserved for later API and callback work, but this phase does not add callback endpoints, Daraja code, STK Push, C2B handling, invoices, receipts, automatic renewals, network provisioning, or customer portals.
+Both hostnames reverse proxy to the same Django web service. The second hostname is used for Daraja sandbox callback evidence endpoints. Phase 9 does not add outbound STK Push, STK Query, canonical payment creation, invoices, receipts, automatic renewals, network provisioning, or customer portals.
 
 ## Architecture
 
@@ -97,9 +97,9 @@ DJANGO_CSRF_TRUSTED_ORIGINS=https://sandbox.supersurf.co.ke,https://sandbox-api.
 SECURE_HSTS_SECONDS=0
 ```
 
-`DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD` are generated cryptographically on the VPS when absent and preserved across later deployments.
+`DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`, and `MPESA_CALLBACK_TOKEN` are generated cryptographically on the VPS when absent and preserved across later deployments. `MPESA_CALLBACK_TOKEN` is generated with `openssl rand -hex 32`; it is required for public LAB deployments, must be at least 32 characters, and must never be printed by deployment or CI output.
 
-Do not add Daraja credentials, M-PESA credentials, consumer keys, consumer secrets, passkeys, Paybill numbers, sandbox tokens, or fake production credentials.
+Do not add Daraja credentials, M-PESA credentials, consumer keys, consumer secrets, passkeys, Paybill numbers, sandbox tokens, or fake production credentials. The callback token is a path secret stored only in the VPS `sandbox.env`; it is not a Daraja credential and must still be treated as secret.
 
 ## Public LAB Security
 
@@ -167,6 +167,51 @@ Follow web logs explicitly:
 ```
 
 Application logs must not contain credentials, tokens, payment secrets, request bodies, or environment-file contents.
+
+## Daraja Sandbox Callback Evidence
+
+Phase 9 exposes three unauthenticated-by-session callback routes on the API hostname. Daraja callbacks cannot be assumed to carry a custom authentication header, so each route uses an unguessable token path segment:
+
+```text
+https://sandbox-api.supersurf.co.ke/api/integrations/mpesa/<token>/c2b/validation/
+https://sandbox-api.supersurf.co.ke/api/integrations/mpesa/<token>/c2b/confirmation/
+https://sandbox-api.supersurf.co.ke/api/integrations/mpesa/<token>/stk/callback/
+```
+
+The endpoints accept JSON `POST` requests only, reject malformed JSON with HTTP 400, reject oversized bodies above 64 KiB with HTTP 413, and return HTTP 404 for missing or incorrect tokens. Accepted C2B validation, C2B confirmation, and STK result callbacks return JSON:
+
+```json
+{"ResultCode": 0, "ResultDesc": "Accepted"}
+```
+
+Repeated callbacks are deduplicated by event type plus the stable provider identifier where present, or by event type plus canonical payload digest as a fallback. Duplicates receive the same successful acknowledgement and do not update the original evidence row.
+
+To print the three full callback URLs during an authenticated SSH operator session, run:
+
+```bash
+cd /opt/supersurf-sandbox/current
+export SUPERSURF_DEPLOYMENT_REVISION="$(cat /opt/supersurf-sandbox/shared/current-successful-sha)"
+export SUPERSURF_SANDBOX_ENV_FILE="/opt/supersurf-sandbox/shared/sandbox.env"
+sudo env \
+  SUPERSURF_DEPLOYMENT_REVISION="$SUPERSURF_DEPLOYMENT_REVISION" \
+  SUPERSURF_SANDBOX_ENV_FILE="$SUPERSURF_SANDBOX_ENV_FILE" \
+  docker compose -p supersurf-sandbox -f compose.yml run --rm web \
+  python manage.py show_mpesa_callback_urls
+```
+
+Do not paste the printed URLs into GitHub issues, normal logs, screenshots, support tickets, or chat channels because the token is embedded in the path.
+
+Register the printed C2B Validation and C2B Confirmation URLs in the Daraja sandbox portal for the sandbox Paybill test. For the initial controlled C2B simulator test, use `SS000001` as the Bill Reference Number so account-reference extraction can be verified without tying the callback to payment processing. Put the printed STK Callback URL into the Daraja STK simulator callback field when capturing STK result evidence.
+
+Captured events are visible to operators with `billing.view_mpesacallbackevent` at:
+
+```text
+https://sandbox.supersurf.co.ke/mpesa-callbacks/
+```
+
+The list and detail pages display only the event envelope, extracted safe fields, and sanitized payload JSON. They do not display the callback token, raw request body, request headers, cookies, client IP address, session data, full telephone numbers, customer names, credentials, or secrets.
+
+This evidence capture phase intentionally does not interpret `ResultCode` 0 as payment, does not create `Payment` records, does not credit Wallets, does not create `BillingPeriod` or `BillingCharge` records, does not renew services, and does not perform any network action. Callback payloads should be inspected through the operator UI and must never be pasted into normal application logs.
 
 ## Revision Tracking
 

@@ -424,6 +424,7 @@ VALID_PUBLIC_LAB_ENV = {
     "DJANGO_CSRF_TRUSTED_ORIGINS": (
         "https://sandbox.supersurf.co.ke,https://sandbox-api.supersurf.co.ke"
     ),
+    "MPESA_CALLBACK_TOKEN": "0" * 64,
 }
 
 
@@ -555,6 +556,7 @@ def test_ordinary_lab_without_public_deployment_retains_local_behavior():
         "DJANGO_ALLOWED_HOSTS",
         "DJANGO_CSRF_TRUSTED_ORIGINS",
         "DJANGO_DEBUG",
+        "MPESA_CALLBACK_TOKEN",
     ],
 )
 def test_public_lab_settings_fail_when_required_setting_is_missing(missing_setting):
@@ -581,6 +583,14 @@ def test_public_lab_settings_reject_debug_true():
 
     assert result.returncode != 0
     assert "DJANGO_DEBUG must be explicitly false" in result.stderr
+
+
+def test_public_lab_settings_reject_short_mpesa_callback_token():
+    env = VALID_PUBLIC_LAB_ENV | {"MPESA_CALLBACK_TOKEN": "short"}
+    result = import_settings_with_env(env)
+
+    assert result.returncode != 0
+    assert "MPESA_CALLBACK_TOKEN must be at least 32 characters" in result.stderr
 
 
 def test_public_lab_settings_enable_secure_public_flags_without_hsts_preload():

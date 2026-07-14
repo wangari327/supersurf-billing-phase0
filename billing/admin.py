@@ -6,6 +6,7 @@ from .models import (
     BillingCharge,
     BillingPeriod,
     LedgerEntry,
+    MpesaCallbackEvent,
     Payment,
     PaymentAllocation,
     PaymentProviderProfile,
@@ -159,6 +160,41 @@ class PaymentProviderProfileAdmin(admin.ModelAdmin):
     list_filter = ("provider", "product_type", "environment", "is_active")
     search_fields = ("name", "external_identifier")
     readonly_fields = [field.name for field in PaymentProviderProfile._meta.fields]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+
+@admin.register(MpesaCallbackEvent)
+class MpesaCallbackEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "event_type",
+        "provider_transaction_id",
+        "checkout_request_id",
+        "account_reference",
+        "result_code",
+        "received_at",
+    )
+    list_filter = ("event_type", "result_code")
+    search_fields = (
+        "provider_transaction_id",
+        "checkout_request_id",
+        "merchant_request_id",
+        "account_reference",
+        "payload_sha256",
+    )
+    readonly_fields = [field.name for field in MpesaCallbackEvent._meta.fields]
 
     def has_add_permission(self, request) -> bool:
         return False

@@ -203,7 +203,9 @@ Do not paste the printed URLs into GitHub issues, normal logs, screenshots, supp
 
 On 2026-07-17, the Daraja 3.0 sandbox C2B Register URL form rejected the attempted validation URL because it contained the word "MPESA". The portal displayed provider-neutral HTTPS confirmation and validation examples, so the public routes now use the neutral `/api/payment-callbacks/` prefix. This is a URL compatibility correction only.
 
-The corrected routes have not yet been manually deployed or registered. After deployment, register the printed C2B Validation and C2B Confirmation URLs in the Daraja sandbox portal for the sandbox Paybill test. For the initial controlled C2B simulator test, use `SS000001` as the Bill Reference Number so account-reference extraction can be verified without tying the callback to payment processing. Put the printed STK Callback URL into the Daraja STK simulator callback field when capturing STK result evidence. Registration, simulation, and callback delivery remain pending operator verification.
+The provider-neutral routes were manually deployed. Daraja C2B Register URL then returned `ResponseCode` `00000000` and `ResponseDescription` `Success`. A controlled Paybill simulation using `CustomerPayBillOnline`, amount `1`, and synthetic `BillRefNumber` `SS000001` produced both validation and confirmation callbacks. The events preserved the same provider transaction identifier, account reference, and amount while using independent event-type-specific idempotency keys. Sensitive name, telephone, and balance fields were redacted, and the observed C2B payloads contained no result code.
+
+A controlled M-Pesa Express/STK Push simulator request using amount `1`, `CustomerPayBillOnline`, and synthetic `AccountReference` `SS000001` was accepted with `ResponseCode` `0`. The corresponding `stk_result` callback carried matching request identifiers and reported `ResultCode` `1037` with `ResultDesc` `No response from user.` The callback contained no metadata, so no amount, provider transaction identifier, or account reference was available in the stored event. This is an observed provider payload characteristic, not an application failure. All actual sandbox shortcode, MSISDN, request identifier, and callback identifier values are intentionally omitted.
 
 Captured events are visible to operators with `billing.view_mpesacallbackevent` at:
 
@@ -211,9 +213,9 @@ Captured events are visible to operators with `billing.view_mpesacallbackevent` 
 https://sandbox.supersurf.co.ke/mpesa-callbacks/
 ```
 
-The list and detail pages display only the event envelope, extracted safe fields, and sanitized payload JSON. They do not display the callback token, raw request body, request headers, cookies, client IP address, session data, full telephone numbers, customer names, credentials, or secrets.
+The list and detail pages display only the event envelope, extracted safe fields, and sanitized payload JSON. The reviewed pages did not display the callback token, callback URL, raw request body, request headers, cookies, client IP address, session data, credentials, or unredacted telephone, name, or balance fields.
 
-This evidence capture phase intentionally does not interpret `ResultCode` 0 as payment, does not create `Payment` records, does not credit Wallets, does not create `BillingPeriod` or `BillingCharge` records, does not renew services, and does not perform any network action. Callback payloads should be inspected through the operator UI and must never be pasted into normal application logs.
+This evidence proves callback registration, delivery, and safe evidence capture only. The evidence capture phase intentionally does not interpret a successful acknowledgement or provider response as payment, does not create `Payment` records, does not credit Wallets or mutate the ledger, does not create `BillingPeriod` or `BillingCharge` records, does not activate or renew services, does not reconcile transactions, and does not establish production readiness. Callback payloads should be inspected through the operator UI and must never be pasted into normal application logs.
 
 ## Revision Tracking
 

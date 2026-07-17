@@ -20,9 +20,31 @@ Each endpoint is CSRF exempt, accepts `POST` only, accepts JSON only, rejects ma
 
 On 2026-07-17, the Daraja 3.0 sandbox C2B Register URL form rejected the attempted validation URL because the URL contained the word "MPESA". The portal's displayed examples used provider-neutral HTTPS confirmation and validation paths. Phase 9 therefore exposes provider-neutral public callback paths under `/api/payment-callbacks/` without changing token authentication, evidence capture, acknowledgements, idempotency, permissions, payload handling, or billing boundaries.
 
-The corrected paths have not yet been deployed or registered by the operator. Successful registration, simulator use, and callback delivery remain pending operator verification.
+The provider-neutral paths were manually deployed. Daraja C2B Register URL then returned `ResponseCode` `00000000` with `ResponseDescription` `Success`.
 
-Accepted C2B validation, C2B confirmation, and STK result callbacks return:
+## 2026-07-17 Sanitized Sandbox Evidence
+
+### Controlled C2B Paybill Run
+
+One controlled Paybill simulation was accepted with `CommandID` `CustomerPayBillOnline`, amount `1`, and synthetic `BillRefNumber` `SS000001`. The portal-provided sandbox shortcode and sandbox MSISDN values are intentionally omitted.
+
+SuperSurf received both `c2b_validation` and `c2b_confirmation`. The events carried the same provider transaction identifier, preserved `BillRefNumber` `SS000001` and amount `1.00`, produced independent event-type-specific idempotency keys, and were stored as immutable callback evidence. Neither observed C2B payload included a result code, which is expected for these payloads.
+
+The sanitized C2B evidence preserved safe fields including `BillRefNumber`, `BusinessShortCode`, `InvoiceNumber`, `ThirdPartyTransID`, `TransAmount`, `TransID`, `TransTime`, and `TransactionType`. Values for `FirstName`, `MiddleName`, `LastName`, `MSISDN`, and `OrgAccountBalance` were replaced with `[REDACTED]`.
+
+### Controlled STK Run
+
+One controlled M-Pesa Express/STK Push simulator request was accepted with `ResponseCode` `0`, amount `1`, transaction type `CustomerPayBillOnline`, and synthetic `AccountReference` `SS000001`. The provider issued a `MerchantRequestID` and `CheckoutRequestID`; their values and all provider-supplied sandbox values are intentionally omitted.
+
+SuperSurf received the corresponding `stk_result` callback with `ResultCode` `1037` and `ResultDesc` `No response from user.` The callback identifiers matched the accepted request, and the idempotency key correctly used event type plus `CheckoutRequestID`.
+
+The observed `1037` callback contained no callback metadata. As a result, no amount, provider transaction identifier, or account reference was available in the stored event. This is an observed provider payload characteristic, not an application failure. Its sanitized payload contained only `MerchantRequestID`, `CheckoutRequestID`, `ResultCode`, and `ResultDesc`.
+
+### Evidence Boundary
+
+The reviewed operator pages contained no callback token, callback URL, raw request body, headers, cookies, client address, session data, credentials, or unredacted telephone, name, or balance fields. This evidence proves sandbox callback registration, delivery, acknowledgement, sanitization, idempotency construction, and immutable evidence capture only. It does not prove or introduce canonical payment creation, Wallet crediting, ledger mutation, billing-period or billing-charge mutation, service activation, renewal, reconciliation, or production readiness.
+
+Accepted C2B validation, C2B confirmation, and STK result callbacks return HTTP 200 with:
 
 ```json
 {"ResultCode": 0, "ResultDesc": "Accepted"}
@@ -103,6 +125,6 @@ The command fails when the token is missing or shorter than 32 characters. It pr
 
 ## Sandbox Evidence Workflow
 
-After the correction is manually deployed, register the printed C2B validation and confirmation URLs in the Daraja sandbox portal. For the first controlled C2B simulator run, use `SS000001` as the Bill Reference Number. Use the printed STK callback URL in the Daraja STK simulator callback field. Do not mark registration or delivery as successful until the operator has verified it.
+For later controlled runs, print callback URLs only in an authenticated operator session and register them directly in Daraja without copying complete URLs into documentation, logs, screenshots, tickets, or chat. Inspect captured events through `/mpesa-callbacks/` as an Administrator or Finance operator and record only sanitized facts in `docs/research/mpesa-sandbox-evidence-checklist.md`.
 
-After Daraja posts callbacks, inspect `/mpesa-callbacks/` as an Administrator or Finance operator. Confirm the acknowledgement response, event type, provider identifiers, account reference, amount, result code, deduplication behavior, and sanitized payload structure. Update `docs/research/mpesa-sandbox-evidence-checklist.md` with the reviewed evidence before any later payment adapter phase.
+The 2026-07-17 evidence does not include a live provider duplicate redelivery test. Automated tests continue to verify duplicate acknowledgement, database-backed idempotency, concurrent delivery handling, and immutability, but those tests must not be represented as provider retry evidence.

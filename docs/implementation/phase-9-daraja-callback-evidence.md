@@ -1,6 +1,6 @@
 # Phase 9 Daraja Callback Evidence Capture
 
-Phase 9 adds inbound Safaricom Daraja sandbox callback receivers and append-only evidence storage. It is intentionally evidence-only: no callback creates canonical `Payment` records, Wallet credits, ledger entries, billing periods, billing charges, renewals, invoices, receipts, service activation, RADIUS rows, PPPoE credentials, RouterOS calls, or network actions.
+Phase 9 adds inbound Safaricom Daraja sandbox callback receivers and append-only evidence storage. Phase 9 itself is complete and evidence-only. The later, explicitly approved Phase 9.1 adapter may process only enabled public-LAB sandbox Paybill `c2b_confirmation` events; see `phase-9-1-sandbox-paybill-adapter.md`. Validation and STK events remain evidence only, and no callback creates billing periods, billing charges, renewals, invoices, receipts, service activation, RADIUS rows, PPPoE credentials, RouterOS calls, or network actions.
 
 ## Routes
 
@@ -61,6 +61,7 @@ Duplicate callbacks receive the same acknowledgement.
 - `payload_sha256`: lowercase canonical JSON SHA-256 digest
 - unique `idempotency_key`
 - `sanitized_payload`
+- optional normalized `provider_external_identifier` extracted from C2B `BusinessShortCode`
 - optional safe extracted fields: provider transaction ID, MerchantRequestID, CheckoutRequestID, account reference, amount, result code, and bounded result description
 - immutable `received_at`
 - immutable `created_at`
@@ -75,13 +76,13 @@ Sanitization recursively redacts sensitive values for keys containing phone, MSI
 
 The sanitizer intentionally preserves safe provider identifiers and matching fields such as `TransID`, `MpesaReceiptNumber`, `BillRefNumber`, `AccountReference`, `MerchantRequestID`, `CheckoutRequestID`, `Amount`, `ResultCode`, `ResultDesc`, and `ResponseCode`.
 
-The stored payload never includes request headers, cookies, client IP addresses, sessions, callback URLs, or the callback token. Logs contain only callback event UUID, event type, digest prefix, duplicate/new status, and result code where available.
+The stored payload never includes request headers, cookies, client IP addresses, sessions, callback URLs, or the callback token. Logs contain only callback event UUID, event type, and bounded new/duplicate/conflict status.
 
 ## Normalization
 
 Extraction is best-effort and never required for a syntactically valid callback to be captured. C2B payloads extract `TransID`, `TransAmount`, and `BillRefNumber` when present. STK payloads extract `MerchantRequestID`, `CheckoutRequestID`, `ResultCode`, `ResultDesc`, and nested `CallbackMetadata.Item` values such as `Amount` and `MpesaReceiptNumber`.
 
-`ResultCode` values are evidence only. `0`, `1037`, and any other result code do not create payments, Wallet credits, or renewals in this phase.
+`ResultCode` values are evidence only. `0`, `1037`, and any other STK result code do not create payments, Wallet credits, or renewals in Phase 9.1.
 
 ## Idempotency
 
@@ -91,7 +92,7 @@ The idempotency key is deterministic:
 - STK callbacks use event type plus `CheckoutRequestID` when present.
 - All callbacks fall back to event type plus canonical payload digest.
 
-The unique database constraint prevents duplicate evidence rows, including concurrent retries. A duplicate request returns HTTP 200, does not update or delete the original row, and logs only duplicate status without raw payload data.
+The unique database constraint prevents duplicate evidence rows, including concurrent retries. An equivalent duplicate returns HTTP 200 and may safely retry Phase 9.1 processing. A duplicate idempotency key with a different canonical digest preserves the original event, records a bounded conflict outcome, returns the normal acknowledgement, and never enters payment processing.
 
 ## Operator Access
 

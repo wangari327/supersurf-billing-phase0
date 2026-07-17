@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import timedelta
-from uuid import UUID
+from decimal import Decimal
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -11,6 +13,7 @@ from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from django.utils import timezone
 
+from audit.models import AuditEvent
 from audit.service import record_event
 from subscribers.models import Service, Subscriber
 
@@ -19,6 +22,8 @@ from .models import (
     BillingCharge,
     BillingPeriod,
     LedgerEntry,
+    MpesaCallbackEvent,
+    MpesaCallbackPaymentLink,
     Payment,
     PaymentAllocation,
     PaymentProviderProfile,
@@ -57,6 +62,17 @@ STALE_BILLING_PERIOD_MESSAGE = (
 STALE_LEDGER_MESSAGE = "The wallet ledger changed while this form was open. Refresh and try again."
 STALE_PAYMENT_MESSAGE = "The payment changed while this form was open. Refresh and try again."
 ACCOUNT_REFERENCE_RE = re.compile(r"^SS\d{6}$")
+
+
+class PaybillProfileUnavailable(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class PaybillProcessingResult:
+    outcome: str
+    payment: Payment | None = None
+    link: MpesaCallbackPaymentLink | None = None
 
 
 def snapshot(plan: Plan) -> dict[str, object]:
@@ -1039,6 +1055,7 @@ def _create_payment_wallet_credit(
     subscriber: Subscriber,
     operation_id: UUID,
     actor,
+    creation_source: str,
 ) -> PaymentAllocation:
     wallet = _get_or_create_locked_wallet(subscriber)
     wallet.subscriber = subscriber
@@ -1060,6 +1077,7 @@ def _create_payment_wallet_credit(
             previous_entry=latest_entry,
             reverses_entry=None,
             reason="Payment credit",
+            creation_source=creation_source,
             created_by=actor,
         )
     )
@@ -1072,36 +1090,49 @@ def _create_payment_wallet_credit(
             allocation_type=PaymentAllocation.ALLOCATION_WALLET_CREDIT,
             amount_minor=payment.amount_minor,
             currency="KES",
+            creation_source=creation_source,
             created_by=actor,
         )
     )
 
 
-@transaction.atomic
-def ingest_fake_payment(
+def _record_system_payment_audit(
     *,
-    provider_profile: PaymentProviderProfile,
-    provider_transaction_id: str,
-    amount,
-    received_at,
-    account_reference,
-    operation_id,
-    actor,
-    payload_digest: str = "",
-    request: HttpRequest | None = None,
-) -> Payment:
-    _payment_mutation_permissions(actor)
-    operation_uuid = _normalize_operation_id(operation_id)
-    amount_minor = _normalize_ledger_amount(amount)
-    received_at = _validate_aware_timestamp(received_at, "Received time")
-    provider_transaction_id = str(provider_transaction_id).strip()
-    if not provider_transaction_id:
-        raise ValidationError("Provider transaction ID is required.")
-    normalized_reference = _normalize_account_reference(account_reference)
-    payload_digest = _normalize_payload_digest(payload_digest)
+    action: str,
+    target_type: str,
+    target_identifier,
+    callback_event: MpesaCallbackEvent,
+    outcome: str,
+    reason: str,
+) -> None:
+    record_event(
+        action=action,
+        target_type=target_type,
+        target_identifier=target_identifier,
+        metadata={
+            "callback_event_id": str(callback_event.pk),
+            "creation_source": "system",
+            "outcome": outcome,
+        },
+        reason=reason,
+    )
 
-    locked_profile = _lock_provider_profile(provider_profile)
-    _assert_fake_profile_can_ingest(locked_profile)
+
+def _ingest_payment_core(
+    *,
+    locked_profile: PaymentProviderProfile,
+    provider_transaction_id: str,
+    amount_minor: int,
+    received_at,
+    normalized_reference: str,
+    operation_uuid: UUID,
+    payload_digest: str,
+    actor,
+    creation_source: str,
+    audit_reason: str,
+    request: HttpRequest | None,
+    callback_event: MpesaCallbackEvent | None = None,
+) -> Payment:
     existing = _find_locked_payment(
         provider_profile=locked_profile,
         provider_transaction_id=provider_transaction_id,
@@ -1138,14 +1169,23 @@ def ingest_fake_payment(
         )
         return payment
 
-    audit_reason = "Fake payment ingestion"
-    _record_payment_event(
-        action="payment.received",
-        payment=payment,
-        actor=actor,
-        request=request,
-        reason=audit_reason,
-    )
+    if callback_event is None:
+        _record_payment_event(
+            action="payment.received",
+            payment=payment,
+            actor=actor,
+            request=request,
+            reason=audit_reason,
+        )
+    else:
+        _record_system_payment_audit(
+            action="mpesa.paybill_payment_received",
+            target_type="payment",
+            target_identifier=payment.pk,
+            callback_event=callback_event,
+            outcome="payment_received",
+            reason=audit_reason,
+        )
 
     subscriber = None
     if ACCOUNT_REFERENCE_RE.fullmatch(normalized_reference):
@@ -1162,13 +1202,23 @@ def ingest_fake_payment(
                 reason_code=_unmatched_reason_code(normalized_reference),
             )
         )
-        _record_unmatched_case_event(
-            action="payment.unmatched",
-            case=case,
-            actor=actor,
-            request=request,
-            reason=audit_reason,
-        )
+        if callback_event is None:
+            _record_unmatched_case_event(
+                action="payment.unmatched",
+                case=case,
+                actor=actor,
+                request=request,
+                reason=audit_reason,
+            )
+        else:
+            _record_system_payment_audit(
+                action="mpesa.paybill_payment_unmatched",
+                target_type="unmatched_payment_case",
+                target_identifier=case.pk,
+                callback_event=callback_event,
+                outcome=case.reason_code,
+                reason=audit_reason,
+            )
         return payment
 
     allocation = _create_payment_wallet_credit(
@@ -1176,22 +1226,269 @@ def ingest_fake_payment(
         subscriber=subscriber,
         operation_id=operation_uuid,
         actor=actor,
+        creation_source=creation_source,
     )
-    _record_payment_allocation_event(
-        action="payment.allocated",
-        allocation=allocation,
-        actor=actor,
-        request=request,
-        reason=audit_reason,
-    )
-    _record_ledger_event(
-        action="wallet.payment_credit",
-        entry=allocation.ledger_entry,
-        actor=actor,
-        request=request,
-        reason=audit_reason,
-    )
+    if callback_event is None:
+        _record_payment_allocation_event(
+            action="payment.allocated",
+            allocation=allocation,
+            actor=actor,
+            request=request,
+            reason=audit_reason,
+        )
+        _record_ledger_event(
+            action="wallet.payment_credit",
+            entry=allocation.ledger_entry,
+            actor=actor,
+            request=request,
+            reason=audit_reason,
+        )
+    else:
+        _record_system_payment_audit(
+            action="mpesa.paybill_payment_allocated",
+            target_type="payment_allocation",
+            target_identifier=allocation.pk,
+            callback_event=callback_event,
+            outcome="wallet_credit",
+            reason=audit_reason,
+        )
+        _record_system_payment_audit(
+            action="mpesa.paybill_wallet_credited",
+            target_type="ledger_entry",
+            target_identifier=allocation.ledger_entry_id,
+            callback_event=callback_event,
+            outcome="payment_credit",
+            reason=audit_reason,
+        )
     return payment
+
+
+@transaction.atomic
+def ingest_fake_payment(
+    *,
+    provider_profile: PaymentProviderProfile,
+    provider_transaction_id: str,
+    amount,
+    received_at,
+    account_reference,
+    operation_id,
+    actor,
+    payload_digest: str = "",
+    request: HttpRequest | None = None,
+) -> Payment:
+    _payment_mutation_permissions(actor)
+    operation_uuid = _normalize_operation_id(operation_id)
+    amount_minor = _normalize_ledger_amount(amount)
+    received_at = _validate_aware_timestamp(received_at, "Received time")
+    provider_transaction_id = str(provider_transaction_id).strip()
+    if not provider_transaction_id:
+        raise ValidationError("Provider transaction ID is required.")
+    normalized_reference = _normalize_account_reference(account_reference)
+    payload_digest = _normalize_payload_digest(payload_digest)
+
+    locked_profile = _lock_provider_profile(provider_profile)
+    _assert_fake_profile_can_ingest(locked_profile)
+    return _ingest_payment_core(
+        locked_profile=locked_profile,
+        provider_transaction_id=provider_transaction_id,
+        amount_minor=amount_minor,
+        received_at=received_at,
+        normalized_reference=normalized_reference,
+        operation_uuid=operation_uuid,
+        payload_digest=payload_digest,
+        actor=actor,
+        creation_source=PaymentAllocation.SOURCE_OPERATOR,
+        audit_reason="Fake payment ingestion",
+        request=request,
+    )
+
+
+def _record_paybill_processing_skip(event: MpesaCallbackEvent, reason_code: str) -> None:
+    if AuditEvent.objects.filter(
+        action="mpesa.paybill_processing_skipped",
+        target_type="mpesa_callback_event",
+        target_identifier=str(event.pk),
+        reason=reason_code,
+    ).exists():
+        return
+    record_event(
+        action="mpesa.paybill_processing_skipped",
+        target_type="mpesa_callback_event",
+        target_identifier=event.pk,
+        metadata={"outcome": reason_code},
+        result="skipped",
+        reason=reason_code,
+    )
+
+
+def record_mpesa_paybill_processing_failure(
+    event: MpesaCallbackEvent,
+    reason_code: str,
+) -> None:
+    record_event(
+        action="mpesa.paybill_processing_failed",
+        target_type="mpesa_callback_event",
+        target_identifier=event.pk,
+        metadata={"outcome": reason_code},
+        result="failure",
+        reason=reason_code,
+    )
+
+
+@transaction.atomic
+def sync_mpesa_paybill_profile() -> PaymentProviderProfile | None:
+    if not settings.MPESA_PAYBILL_INGESTION_ENABLED:
+        return None
+    if (
+        settings.SUPERSURF_ENVIRONMENT != "LAB"
+        or not settings.SUPERSURF_PUBLIC_DEPLOYMENT
+        or len(settings.MPESA_CALLBACK_TOKEN) < 32
+        or not re.fullmatch(r"[0-9]{5,12}", settings.MPESA_PAYBILL_EXTERNAL_IDENTIFIER)
+    ):
+        raise ValidationError("M-PESA Paybill profile configuration is not approved.")
+
+    identifier = settings.MPESA_PAYBILL_EXTERNAL_IDENTIFIER
+    profiles = PaymentProviderProfile.objects.select_for_update(of=("self",))
+    conflicting = profiles.filter(
+        provider=PaymentProviderProfile.PROVIDER_MPESA,
+        product_type=PaymentProviderProfile.PRODUCT_PAYBILL,
+        environment=PaymentProviderProfile.ENVIRONMENT_SANDBOX,
+        is_active=True,
+    ).exclude(external_identifier=identifier)
+    if conflicting.exists():
+        raise ValidationError("A conflicting active sandbox Paybill profile exists.")
+
+    profile = profiles.filter(
+        provider=PaymentProviderProfile.PROVIDER_MPESA,
+        product_type=PaymentProviderProfile.PRODUCT_PAYBILL,
+        environment=PaymentProviderProfile.ENVIRONMENT_SANDBOX,
+        external_identifier=identifier,
+    ).first()
+    action = ""
+    if profile is None:
+        profile = PaymentProviderProfile.objects.create(
+            name="M-PESA Sandbox Paybill",
+            provider=PaymentProviderProfile.PROVIDER_MPESA,
+            product_type=PaymentProviderProfile.PRODUCT_PAYBILL,
+            environment=PaymentProviderProfile.ENVIRONMENT_SANDBOX,
+            external_identifier=identifier,
+            is_active=True,
+        )
+        action = "mpesa.paybill_profile_created"
+    elif not profile.is_active:
+        profile.is_active = True
+        profile.save(update_fields=["is_active", "updated_at"])
+        action = "mpesa.paybill_profile_activated"
+
+    if action:
+        record_event(
+            action=action,
+            target_type="payment_provider_profile",
+            target_identifier=profile.pk,
+            metadata={
+                "provider": "mpesa",
+                "product": "paybill",
+                "environment": "sandbox",
+            },
+            reason="approved_sandbox_paybill_configuration",
+        )
+    return profile
+
+
+@transaction.atomic
+def process_mpesa_paybill_confirmation_event(
+    event: MpesaCallbackEvent,
+) -> PaybillProcessingResult:
+    locked_event = MpesaCallbackEvent.objects.select_for_update(of=("self",)).get(pk=event.pk)
+    existing_link = (
+        MpesaCallbackPaymentLink.objects.select_related("payment")
+        .filter(callback_event=locked_event)
+        .first()
+    )
+    if existing_link is not None:
+        return PaybillProcessingResult(
+            outcome="already_processed",
+            payment=existing_link.payment,
+            link=existing_link,
+        )
+
+    if not settings.MPESA_PAYBILL_INGESTION_ENABLED:
+        return PaybillProcessingResult(outcome="ingestion_disabled")
+    if (
+        settings.SUPERSURF_ENVIRONMENT != "LAB"
+        or not settings.SUPERSURF_PUBLIC_DEPLOYMENT
+        or len(settings.MPESA_CALLBACK_TOKEN) < 32
+        or not re.fullmatch(r"[0-9]{5,12}", settings.MPESA_PAYBILL_EXTERNAL_IDENTIFIER)
+    ):
+        raise PaybillProfileUnavailable("runtime_configuration_invalid")
+    if locked_event.event_type != MpesaCallbackEvent.EVENT_C2B_CONFIRMATION:
+        _record_paybill_processing_skip(locked_event, "unsupported_event_type")
+        return PaybillProcessingResult(outcome="unsupported_event_type")
+    if not locked_event.provider_transaction_id:
+        _record_paybill_processing_skip(locked_event, "missing_transaction_id")
+        return PaybillProcessingResult(outcome="missing_transaction_id")
+    if (
+        locked_event.amount is None
+        or not isinstance(locked_event.amount, Decimal)
+        or not locked_event.amount.is_finite()
+        or locked_event.amount <= 0
+    ):
+        _record_paybill_processing_skip(locked_event, "invalid_amount")
+        return PaybillProcessingResult(outcome="invalid_amount")
+    if locked_event.provider_external_identifier != settings.MPESA_PAYBILL_EXTERNAL_IDENTIFIER:
+        _record_paybill_processing_skip(locked_event, "provider_identifier_mismatch")
+        return PaybillProcessingResult(outcome="provider_identifier_mismatch")
+
+    amount_minor = ksh_to_minor_units(locked_event.amount)
+    if amount_minor <= 0 or amount_minor > MAX_MONEY_MINOR:
+        _record_paybill_processing_skip(locked_event, "invalid_amount")
+        return PaybillProcessingResult(outcome="invalid_amount")
+
+    try:
+        profile = PaymentProviderProfile.objects.select_for_update(of=("self",)).get(
+            provider=PaymentProviderProfile.PROVIDER_MPESA,
+            product_type=PaymentProviderProfile.PRODUCT_PAYBILL,
+            environment=PaymentProviderProfile.ENVIRONMENT_SANDBOX,
+            external_identifier=settings.MPESA_PAYBILL_EXTERNAL_IDENTIFIER,
+            is_active=True,
+        )
+    except PaymentProviderProfile.DoesNotExist as exc:
+        raise PaybillProfileUnavailable("paybill_profile_unavailable") from exc
+
+    operation_uuid = uuid5(
+        NAMESPACE_URL,
+        f"supersurf:mpesa-paybill-confirmation:{locked_event.pk}",
+    )
+    payment = _ingest_payment_core(
+        locked_profile=profile,
+        provider_transaction_id=locked_event.provider_transaction_id,
+        amount_minor=amount_minor,
+        received_at=locked_event.received_at,
+        normalized_reference=_normalize_account_reference(locked_event.account_reference),
+        operation_uuid=operation_uuid,
+        payload_digest=locked_event.payload_sha256,
+        actor=None,
+        creation_source=PaymentAllocation.SOURCE_SYSTEM,
+        audit_reason="sandbox_paybill_confirmation",
+        request=None,
+        callback_event=locked_event,
+    )
+    link = MpesaCallbackPaymentLink.objects.create(
+        callback_event=locked_event,
+        payment=payment,
+    )
+    record_event(
+        action="mpesa.callback_payment_linked",
+        target_type="mpesa_callback_payment_link",
+        target_identifier=link.pk,
+        metadata={
+            "callback_event_id": str(locked_event.pk),
+            "payment_id": str(payment.pk),
+            "outcome": "linked",
+        },
+        reason="sandbox_paybill_confirmation",
+    )
+    return PaybillProcessingResult(outcome="processed", payment=payment, link=link)
 
 
 @transaction.atomic
@@ -1247,6 +1544,7 @@ def resolve_unmatched_payment(
         subscriber=locked_subscriber,
         operation_id=operation_uuid,
         actor=actor,
+        creation_source=PaymentAllocation.SOURCE_OPERATOR,
     )
     case.status = UnmatchedPaymentCase.STATUS_RESOLVED
     case.resolved_wallet = allocation.wallet

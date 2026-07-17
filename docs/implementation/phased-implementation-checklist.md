@@ -139,6 +139,31 @@
 - [x] Tests.
 - [x] Stop for approval.
 
+## Phase 9: Daraja Sandbox Callback Evidence
+
+- [x] Provider-neutral tokenized callback routes.
+- [x] C2B validation, C2B confirmation, and STK result evidence capture.
+- [x] Recursive sensitive-value redaction and deterministic payload hashing.
+- [x] Append-only callback events and database-backed idempotency.
+- [x] Read-only Administrator and Finance operator interface.
+- [x] Controlled sandbox registration and delivery evidence.
+- [x] Stop for approval.
+
+## Phase 9.1: Sandbox Paybill Canonical Payment Adapter
+
+- [x] Explicit public-LAB enable gate and fail-closed configuration.
+- [x] Idempotent sandbox Paybill provider-profile synchronization.
+- [x] Safe `BusinessShortCode` extraction into callback evidence.
+- [x] Conflicting duplicate payload detection.
+- [x] C2B confirmation-only canonical payment processing.
+- [x] Existing account-reference matching and unmatched-case behavior.
+- [x] System/operator accounting provenance constraints.
+- [x] Append-only callback-to-payment links.
+- [x] Permission-respecting callback and Payment cross-links.
+- [x] SQLite regression coverage and PostgreSQL concurrency coverage.
+- [ ] Owner-deployed controlled live sandbox Paybill payment verification.
+- [x] Stop before Phase 9.2.
+
 ## Future Phase: Billing And Payments
 
 - [ ] Invoices.
@@ -151,13 +176,15 @@
 
 ## Future Phase: M-PESA
 
-- [ ] Validated Daraja research.
-- [ ] Sandbox setup.
-- [ ] Paybill adapter.
+- [x] Validated Daraja research for Phase 9 evidence capture.
+- [x] Sandbox callback evidence setup.
+- [x] Phase 9.1 inbound sandbox Paybill confirmation adapter.
 - [ ] Till adapter.
-- [ ] Callback persistence.
-- [ ] Idempotency.
-- [ ] Provider-specific matching into the canonical payment service.
+- [x] Append-only callback persistence.
+- [x] Callback and canonical-payment idempotency for the approved Paybill scope.
+- [x] Sandbox Paybill confirmation matching into the canonical payment service.
+- [ ] STK payment processing.
+- [ ] Production M-PESA processing.
 - [ ] Reconciliation.
 - [ ] Tests.
 - [ ] Stop for approval.

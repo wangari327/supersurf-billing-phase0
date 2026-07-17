@@ -83,6 +83,7 @@ wait_for_service_health broker 60 5
 
 compose_cmd run --rm --no-deps web python manage.py migrate --noinput
 compose_cmd run --rm --no-deps web python manage.py seed_roles
+compose_cmd run --rm --no-deps web python manage.py sync_mpesa_paybill_profile
 
 compose_cmd up -d web
 wait_for_service_health web 60 5

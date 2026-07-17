@@ -87,7 +87,7 @@
                 <td class="px-4 py-3">{{ entry.formatted_amount }}</td>
                 <td class="px-4 py-3">{{ entry.formatted_balance_after }}</td>
                 <td class="px-4 py-3">{{ entry.reason }}</td>
-                <td class="px-4 py-3">{{ entry.created_by.username }}</td>
+                <td class="px-4 py-3">{% if entry.creation_source == "system" %}System{% else %}{{ entry.created_by.username }}{% endif %}</td>
                 <td class="px-4 py-3">{{ entry.created_at|date:"Y-m-d H:i" }}</td>
                 <td class="px-4 py-3">
                   {% if row.is_reversal %}

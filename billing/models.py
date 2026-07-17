@@ -11,7 +11,7 @@ from django.db.models import F, Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
-from .money import format_ksh
+from .money import format_ksh, ksh_to_minor_units
 
 MAX_MONEY_MINOR = 2_147_483_647
 
@@ -676,6 +676,12 @@ class LedgerEntry(models.Model):
         (DIRECTION_CREDIT, "Credit"),
         (DIRECTION_DEBIT, "Debit"),
     ]
+    SOURCE_OPERATOR = "operator"
+    SOURCE_SYSTEM = "system"
+    CREATION_SOURCE_CHOICES = [
+        (SOURCE_OPERATOR, "Operator"),
+        (SOURCE_SYSTEM, "System"),
+    ]
     IMMUTABLE_FIELDS = (
         "wallet_id",
         "sequence_number",
@@ -688,6 +694,7 @@ class LedgerEntry(models.Model):
         "previous_entry_id",
         "reverses_entry_id",
         "reason",
+        "creation_source",
         "created_by_id",
         "created_at",
     )
@@ -726,8 +733,16 @@ class LedgerEntry(models.Model):
         related_name="reversal_entry",
     )
     reason = models.CharField(max_length=240)
+    creation_source = models.CharField(
+        max_length=12,
+        choices=CREATION_SOURCE_CHOICES,
+        default=SOURCE_OPERATOR,
+        editable=False,
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name="created_ledger_entries",
     )
@@ -790,6 +805,20 @@ class LedgerEntry(models.Model):
             ),
             models.CheckConstraint(
                 condition=(
+                    Q(creation_source="operator", created_by__isnull=False)
+                    | Q(creation_source="system", created_by__isnull=True)
+                ),
+                name="ledger_entry_source_actor_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(creation_source="operator")
+                    | Q(creation_source="system", entry_type="payment_credit")
+                ),
+                name="ledger_entry_system_payment_only",
+            ),
+            models.CheckConstraint(
+                condition=(
                     Q(entry_type="manual_credit", direction="credit")
                     | Q(entry_type="manual_debit", direction="debit")
                     | Q(entry_type="billing_charge", direction="debit")
@@ -841,6 +870,19 @@ class LedgerEntry(models.Model):
             raise ValidationError({"entry_type": "Ledger entry type is not valid."})
         if self.direction not in {self.DIRECTION_CREDIT, self.DIRECTION_DEBIT}:
             raise ValidationError({"direction": "Ledger direction is not valid."})
+        if self.creation_source not in {self.SOURCE_OPERATOR, self.SOURCE_SYSTEM}:
+            raise ValidationError({"creation_source": "Creation source is not valid."})
+        if self.creation_source == self.SOURCE_OPERATOR and not self.created_by_id:
+            raise ValidationError({"created_by": "Operator-created entries require an operator."})
+        if self.creation_source == self.SOURCE_SYSTEM and self.created_by_id:
+            raise ValidationError({"created_by": "System-created entries cannot have an operator."})
+        if (
+            self.creation_source == self.SOURCE_SYSTEM
+            and self.entry_type != self.ENTRY_PAYMENT_CREDIT
+        ):
+            raise ValidationError(
+                {"creation_source": "System creation is limited to payment credits."}
+            )
         if self.currency != "KES":
             raise ValidationError({"currency": "Ledger currency must be KES."})
         if self.sequence_number is not None:
@@ -1287,6 +1329,7 @@ class MpesaCallbackEvent(models.Model):
         "payload_sha256",
         "idempotency_key",
         "sanitized_payload",
+        "provider_external_identifier",
         "provider_transaction_id",
         "merchant_request_id",
         "checkout_request_id",
@@ -1304,6 +1347,7 @@ class MpesaCallbackEvent(models.Model):
     payload_sha256 = models.CharField(max_length=64)
     idempotency_key = models.CharField(max_length=160, unique=True)
     sanitized_payload = models.JSONField()
+    provider_external_identifier = models.CharField(max_length=64, blank=True, db_index=True)
     provider_transaction_id = models.CharField(max_length=128, blank=True)
     merchant_request_id = models.CharField(max_length=128, blank=True)
     checkout_request_id = models.CharField(max_length=128, blank=True)
@@ -1365,6 +1409,9 @@ class MpesaCallbackEvent(models.Model):
         super().clean()
         self.payload_sha256 = self.payload_sha256.strip().lower()
         self.idempotency_key = self.idempotency_key.strip()
+        self.provider_external_identifier = self._clean_provider_identifier(
+            self.provider_external_identifier
+        )
         self.provider_transaction_id = self._clean_optional(self.provider_transaction_id)
         self.merchant_request_id = self._clean_optional(self.merchant_request_id)
         self.checkout_request_id = self._clean_optional(self.checkout_request_id)
@@ -1397,6 +1444,13 @@ class MpesaCallbackEvent(models.Model):
         if value is None:
             return ""
         cleaned = str(value).strip()
+        return cleaned
+
+    @staticmethod
+    def _clean_provider_identifier(value: str | None) -> str:
+        cleaned = MpesaCallbackEvent._clean_optional(value)
+        if not re.fullmatch(r"[0-9]{5,12}", cleaned):
+            return ""
         return cleaned
 
     def _reject_protected_changes(self, update_fields=None) -> None:
@@ -1482,12 +1536,25 @@ class PaymentProviderProfile(models.Model):
                 condition=Q(environment__in=["test", "sandbox", "production"]),
                 name="payment_provider_environment_valid",
             ),
+            models.CheckConstraint(
+                condition=(
+                    Q(provider="fake", product_type="fake")
+                    | Q(provider="mpesa", product_type__in=["paybill", "till"])
+                ),
+                name="payment_provider_product_pair_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["product_type", "environment"],
+                condition=Q(provider="mpesa", is_active=True),
+                name="one_active_mpesa_product_environment",
+            ),
         ]
 
     def __str__(self) -> str:
         return self.name
 
     def save(self, *args, **kwargs) -> None:
+        self._reject_paid_identity_changes(update_fields=kwargs.get("update_fields"))
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -1513,6 +1580,39 @@ class PaymentProviderProfile(models.Model):
             self.ENVIRONMENT_PRODUCTION,
         }:
             raise ValidationError({"environment": "Payment environment is not valid."})
+        if self.provider == self.PROVIDER_FAKE and self.product_type != self.PRODUCT_FAKE:
+            raise ValidationError({"product_type": "Fake providers require the fake product."})
+        if self.provider == self.PROVIDER_MPESA and self.product_type not in {
+            self.PRODUCT_PAYBILL,
+            self.PRODUCT_TILL,
+        }:
+            raise ValidationError({"product_type": "M-PESA providers require Paybill or Till."})
+
+    def _reject_paid_identity_changes(self, update_fields=None) -> None:
+        if not self.pk or not Payment.objects.filter(provider_profile_id=self.pk).exists():
+            return
+        identity_fields = {
+            "provider",
+            "product_type",
+            "environment",
+            "external_identifier",
+        }
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(identity_fields)
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(
+                    f"Payment provider identity cannot change after payments exist: {names}."
+                )
+        current = type(self).objects.get(pk=self.pk)
+        changed = [
+            field for field in identity_fields if getattr(current, field) != getattr(self, field)
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(
+                f"Payment provider identity cannot change after payments exist: {names}."
+            )
 
 
 class PaymentQuerySet(models.QuerySet):
@@ -1697,6 +1797,12 @@ class PaymentAllocationManager(models.Manager):
 class PaymentAllocation(models.Model):
     ALLOCATION_WALLET_CREDIT = "wallet_credit"
     ALLOCATION_TYPE_CHOICES = [(ALLOCATION_WALLET_CREDIT, "Wallet credit")]
+    SOURCE_OPERATOR = "operator"
+    SOURCE_SYSTEM = "system"
+    CREATION_SOURCE_CHOICES = [
+        (SOURCE_OPERATOR, "Operator"),
+        (SOURCE_SYSTEM, "System"),
+    ]
     IMMUTABLE_FIELDS = (
         "payment_id",
         "wallet_id",
@@ -1705,6 +1811,7 @@ class PaymentAllocation(models.Model):
         "allocation_type",
         "amount_minor",
         "currency",
+        "creation_source",
         "created_by_id",
         "created_at",
     )
@@ -1738,8 +1845,16 @@ class PaymentAllocation(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(MAX_MONEY_MINOR)]
     )
     currency = models.CharField(max_length=3, default="KES", editable=False)
+    creation_source = models.CharField(
+        max_length=12,
+        choices=CREATION_SOURCE_CHOICES,
+        default=SOURCE_OPERATOR,
+        editable=False,
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name="created_payment_allocations",
     )
@@ -1770,6 +1885,13 @@ class PaymentAllocation(models.Model):
                 condition=Q(currency="KES"),
                 name="payment_allocation_currency_kes",
             ),
+            models.CheckConstraint(
+                condition=(
+                    Q(creation_source="operator", created_by__isnull=False)
+                    | Q(creation_source="system", created_by__isnull=True)
+                ),
+                name="payment_allocation_source_actor_valid",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -1784,6 +1906,16 @@ class PaymentAllocation(models.Model):
         super().clean()
         if self.allocation_type != self.ALLOCATION_WALLET_CREDIT:
             raise ValidationError({"allocation_type": "Allocation type must be wallet credit."})
+        if self.creation_source not in {self.SOURCE_OPERATOR, self.SOURCE_SYSTEM}:
+            raise ValidationError({"creation_source": "Creation source is not valid."})
+        if self.creation_source == self.SOURCE_OPERATOR and not self.created_by_id:
+            raise ValidationError(
+                {"created_by": "Operator-created allocations require an operator."}
+            )
+        if self.creation_source == self.SOURCE_SYSTEM and self.created_by_id:
+            raise ValidationError(
+                {"created_by": "System-created allocations cannot have an operator."}
+            )
         if self.currency != "KES":
             raise ValidationError({"currency": "Payment allocation currency must be KES."})
         if self.amount_minor is not None and self.amount_minor <= 0:
@@ -1828,6 +1960,20 @@ class PaymentAllocation(models.Model):
                 raise ValidationError(
                     {"created_by": "Ledger entry operator must match allocation operator."}
                 )
+            if self.ledger_entry.creation_source != self.creation_source:
+                raise ValidationError(
+                    {"creation_source": "Ledger entry and allocation sources must match."}
+                )
+        if self.creation_source == self.SOURCE_SYSTEM and self.payment_id:
+            profile = self.payment.provider_profile
+            if (
+                profile.provider != PaymentProviderProfile.PROVIDER_MPESA
+                or profile.product_type != PaymentProviderProfile.PRODUCT_PAYBILL
+                or profile.environment != PaymentProviderProfile.ENVIRONMENT_SANDBOX
+            ):
+                raise ValidationError(
+                    {"creation_source": "System allocations require sandbox M-PESA Paybill."}
+                )
 
     def delete(self, *args, **kwargs) -> None:
         msg = "PaymentAllocation records cannot be deleted through application code."
@@ -1862,6 +2008,121 @@ class PaymentAllocation(models.Model):
             names = ", ".join(sorted(changed))
             raise RuntimeError(
                 f"PaymentAllocation fields cannot be changed after creation: {names}."
+            )
+
+
+class MpesaCallbackPaymentLinkQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        msg = "MpesaCallbackPaymentLink records cannot be updated through application code."
+        raise RuntimeError(msg)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "MpesaCallbackPaymentLink records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+    def delete(self):
+        msg = "MpesaCallbackPaymentLink records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+
+class MpesaCallbackPaymentLinkManager(models.Manager):
+    def get_queryset(self):
+        return MpesaCallbackPaymentLinkQuerySet(self.model, using=self._db)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        msg = "MpesaCallbackPaymentLink records cannot be bulk-updated through application code."
+        raise RuntimeError(msg)
+
+
+class MpesaCallbackPaymentLink(models.Model):
+    IMMUTABLE_FIELDS = ("callback_event_id", "payment_id", "created_at")
+    IMMUTABLE_UPDATE_FIELDS = frozenset(IMMUTABLE_FIELDS) | {"callback_event", "payment"}
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    callback_event = models.OneToOneField(
+        MpesaCallbackEvent,
+        on_delete=models.PROTECT,
+        related_name="payment_link",
+    )
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="mpesa_callback_link",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = MpesaCallbackPaymentLinkManager()
+
+    class Meta:
+        verbose_name = "M-PESA callback payment link"
+        verbose_name_plural = "M-PESA callback payment links"
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return str(self.pk)
+
+    def save(self, *args, **kwargs) -> None:
+        self._reject_protected_changes(update_fields=kwargs.get("update_fields"))
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        if not self.callback_event_id or not self.payment_id:
+            return
+        event = self.callback_event
+        payment = self.payment
+        profile = payment.provider_profile
+        if event.event_type != MpesaCallbackEvent.EVENT_C2B_CONFIRMATION:
+            raise ValidationError({"callback_event": "Only C2B confirmations may link payments."})
+        if (
+            profile.provider != PaymentProviderProfile.PROVIDER_MPESA
+            or profile.product_type != PaymentProviderProfile.PRODUCT_PAYBILL
+            or profile.environment != PaymentProviderProfile.ENVIRONMENT_SANDBOX
+        ):
+            raise ValidationError(
+                {"payment": "Linked payments must use sandbox M-PESA Paybill."}
+            )
+        if event.provider_external_identifier != profile.external_identifier:
+            raise ValidationError({"payment": "Callback provider does not match the payment."})
+        if event.provider_transaction_id != payment.provider_transaction_id:
+            raise ValidationError({"payment": "Callback transaction does not match the payment."})
+        if event.amount is None or ksh_to_minor_units(event.amount) != payment.amount_minor:
+            raise ValidationError({"payment": "Callback amount does not match the payment."})
+        if event.account_reference.strip().upper() != payment.account_reference:
+            raise ValidationError({"payment": "Callback reference does not match the payment."})
+        if event.payload_sha256 != payment.payload_digest:
+            raise ValidationError({"payment": "Callback digest does not match the payment."})
+
+    def delete(self, *args, **kwargs) -> None:
+        msg = "MpesaCallbackPaymentLink records cannot be deleted through application code."
+        raise RuntimeError(msg)
+
+    def _reject_protected_changes(self, update_fields=None) -> None:
+        if not self.pk:
+            return
+        if update_fields is not None:
+            protected = {str(field) for field in update_fields}.intersection(
+                self.IMMUTABLE_UPDATE_FIELDS
+            )
+            if protected:
+                names = ", ".join(sorted(protected))
+                raise RuntimeError(
+                    f"MpesaCallbackPaymentLink fields cannot change after creation: {names}."
+                )
+        try:
+            current = type(self).objects.get(pk=self.pk)
+        except type(self).DoesNotExist:
+            return
+        changed = [
+            field
+            for field in self.IMMUTABLE_FIELDS
+            if getattr(current, field) != getattr(self, field)
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise RuntimeError(
+                f"MpesaCallbackPaymentLink fields cannot change after creation: {names}."
             )
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -29,6 +30,19 @@ def env_bool(name: str, default: bool = False) -> bool:
     return default
 
 
+def env_strict_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in TRUE_VALUES:
+        return True
+    if normalized in FALSE_VALUES:
+        return False
+    msg = f"{name} must be an explicit boolean value."
+    raise ImproperlyConfigured(msg)
+
+
 def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in env(name, default).split(",") if item.strip()]
 
@@ -45,6 +59,11 @@ SUPERSURF_PUBLIC_DEPLOYMENT = env_bool("SUPERSURF_PUBLIC_DEPLOYMENT", default=Fa
 SECURE_PUBLIC_DEPLOYMENT = SUPERSURF_ENVIRONMENT == "PRODUCTION" or SUPERSURF_PUBLIC_DEPLOYMENT
 SUPERSURF_STATICFILES_MANIFEST = env_bool("SUPERSURF_STATICFILES_MANIFEST", default=False)
 MPESA_CALLBACK_TOKEN = env("MPESA_CALLBACK_TOKEN").strip()
+MPESA_PAYBILL_INGESTION_ENABLED = env_strict_bool(
+    "MPESA_PAYBILL_INGESTION_ENABLED",
+    default=False,
+)
+MPESA_PAYBILL_EXTERNAL_IDENTIFIER = env("MPESA_PAYBILL_EXTERNAL_IDENTIFIER").strip()
 MPESA_CALLBACK_BASE_URL = env(
     "MPESA_CALLBACK_BASE_URL",
     "https://sandbox-api.supersurf.co.ke",
@@ -52,6 +71,17 @@ MPESA_CALLBACK_BASE_URL = env(
 
 
 def validate_public_deployment_environment() -> None:
+    if MPESA_PAYBILL_INGESTION_ENABLED:
+        if SUPERSURF_ENVIRONMENT != "LAB" or not SUPERSURF_PUBLIC_DEPLOYMENT:
+            msg = "M-PESA Paybill ingestion is supported only in a public LAB deployment."
+            raise ImproperlyConfigured(msg)
+        if not re.fullmatch(r"[0-9]{5,12}", MPESA_PAYBILL_EXTERNAL_IDENTIFIER):
+            msg = "MPESA_PAYBILL_EXTERNAL_IDENTIFIER is missing or malformed."
+            raise ImproperlyConfigured(msg)
+        if len(MPESA_CALLBACK_TOKEN) < 32:
+            msg = "MPESA_CALLBACK_TOKEN must be at least 32 characters for Paybill ingestion."
+            raise ImproperlyConfigured(msg)
+
     if not SECURE_PUBLIC_DEPLOYMENT:
         return
 

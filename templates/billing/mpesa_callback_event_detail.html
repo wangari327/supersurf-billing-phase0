@@ -13,6 +13,13 @@
   </div>
 
   <div class="mt-6 grid gap-4 sm:grid-cols-2">
+    <div class="card p-4 sm:col-span-2">
+      <p class="text-sm text-slate-600">Payment processing</p>
+      <p class="mt-1 text-lg font-semibold">{{ processing_state }}</p>
+      {% if payment_link and can_view_linked_payment %}
+        <a class="mt-2 inline-block text-sm font-medium text-sky-700 hover:text-sky-900" href="{% url 'payment_detail' payment_link.payment_id %}">View canonical payment</a>
+      {% endif %}
+    </div>
     <div class="card p-4">
       <p class="text-sm text-slate-600">Provider transaction</p>
       <p class="mt-1 break-all text-lg font-semibold">{{ event.provider_transaction_id|default:"-" }}</p>

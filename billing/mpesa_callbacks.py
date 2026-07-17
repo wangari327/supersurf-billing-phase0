@@ -9,6 +9,8 @@ from typing import Any
 
 from django.db import IntegrityError, transaction
 
+from audit.service import record_event
+
 from .models import MpesaCallbackEvent
 
 MAX_CALLBACK_BODY_BYTES = 64 * 1024
@@ -41,6 +43,7 @@ logger = logging.getLogger(__name__)
 class CapturedCallback:
     event: MpesaCallbackEvent
     created: bool
+    conflicting_duplicate: bool = False
 
 
 def canonical_json(payload: Any) -> str:
@@ -88,15 +91,29 @@ def capture_mpesa_callback(event_type: str, payload: Any) -> CapturedCallback:
     except IntegrityError:
         event = MpesaCallbackEvent.objects.get(idempotency_key=idempotency_key)
         created = False
-    logger.info(
-        "mpesa_callback_event id=%s event_type=%s digest_prefix=%s status=%s result_code=%s",
+    conflicting_duplicate = not created and event.payload_sha256 != digest
+    status = "conflict" if conflicting_duplicate else "new" if created else "duplicate"
+    log_method = logger.warning if conflicting_duplicate else logger.info
+    log_method(
+        "mpesa_callback_event id=%s event_type=%s status=%s",
         event.pk,
         event.event_type,
-        event.payload_sha256[:12],
-        "new" if created else "duplicate",
-        event.result_code or "",
+        status,
     )
-    return CapturedCallback(event=event, created=created)
+    if conflicting_duplicate:
+        record_event(
+            action="mpesa.callback_conflict",
+            target_type="mpesa_callback_event",
+            target_identifier=event.pk,
+            metadata={"outcome": "duplicate_payload_conflict"},
+            result="skipped",
+            reason="duplicate_payload_conflict",
+        )
+    return CapturedCallback(
+        event=event,
+        created=created,
+        conflicting_duplicate=conflicting_duplicate,
+    )
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -112,6 +129,9 @@ def _metadata_item_name(value: dict[Any, Any]) -> str | None:
 
 
 def _extract_callback_fields(payload: Any) -> dict[str, Any]:
+    provider_external_identifier = _normalize_provider_identifier(
+        _first_value(payload, "BusinessShortCode")
+    )
     provider_transaction_id = _normalize_text(
         _coalesce(_first_value(payload, "TransID"), _metadata_value(payload, "MpesaReceiptNumber")),
         max_length=128,
@@ -147,6 +167,7 @@ def _extract_callback_fields(payload: Any) -> dict[str, Any]:
         truncate=True,
     )
     return {
+        "provider_external_identifier": provider_external_identifier,
         "provider_transaction_id": provider_transaction_id,
         "merchant_request_id": merchant_request_id,
         "checkout_request_id": checkout_request_id,
@@ -155,6 +176,13 @@ def _extract_callback_fields(payload: Any) -> dict[str, Any]:
         "result_code": result_code,
         "result_description": result_description,
     }
+
+
+def _normalize_provider_identifier(value: Any) -> str | None:
+    text = _normalize_text(value, max_length=64)
+    if text is None or not text.isascii() or not text.isdigit() or not 5 <= len(text) <= 12:
+        return None
+    return text
 
 
 def _idempotency_key(event_type: str, extracted: dict[str, Any], digest: str) -> str:
@@ -239,7 +267,10 @@ def _normalize_decimal(value: Any) -> Decimal | None:
         amount = Decimal(text)
         if not amount.is_finite() or amount <= 0:
             return None
-        amount = amount.quantize(Decimal("0.01"))
+        normalized = amount.quantize(Decimal("0.01"))
+        if amount != normalized:
+            return None
+        amount = normalized
     except InvalidOperation:
         return None
     if amount > MAX_CALLBACK_AMOUNT:

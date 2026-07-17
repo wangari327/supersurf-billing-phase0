@@ -7,6 +7,7 @@ from .models import (
     BillingPeriod,
     LedgerEntry,
     MpesaCallbackEvent,
+    MpesaCallbackPaymentLink,
     Payment,
     PaymentAllocation,
     PaymentProviderProfile,
@@ -195,6 +196,27 @@ class MpesaCallbackEventAdmin(admin.ModelAdmin):
         "payload_sha256",
     )
     readonly_fields = [field.name for field in MpesaCallbackEvent._meta.fields]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+
+@admin.register(MpesaCallbackPaymentLink)
+class MpesaCallbackPaymentLinkAdmin(admin.ModelAdmin):
+    list_display = ("callback_event", "payment", "created_at")
+    search_fields = ("callback_event__id", "payment__id")
+    readonly_fields = [field.name for field in MpesaCallbackPaymentLink._meta.fields]
 
     def has_add_permission(self, request) -> bool:
         return False

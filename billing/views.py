@@ -36,6 +36,7 @@ from .models import (
     BillingPeriod,
     LedgerEntry,
     MpesaCallbackEvent,
+    MpesaCallbackPaymentLink,
     Payment,
     PaymentAllocation,
     Plan,
@@ -45,6 +46,7 @@ from .models import (
 )
 from .mpesa_callbacks import MAX_CALLBACK_BODY_BYTES, capture_mpesa_callback
 from .services import (
+    PaybillProfileUnavailable,
     activate_billing_period,
     activate_service_from_wallet,
     assign_package,
@@ -54,6 +56,8 @@ from .services import (
     end_subscription,
     ingest_fake_payment,
     post_manual_wallet_adjustment,
+    process_mpesa_paybill_confirmation_event,
+    record_mpesa_paybill_processing_failure,
     renew_billing_period,
     renew_service_from_wallet,
     resolve_unmatched_payment,
@@ -102,6 +106,13 @@ def _reject_non_json_constant(value: str) -> Never:
     raise ValueError(f"Invalid JSON constant: {value}")
 
 
+def _record_callback_processing_failure(event: MpesaCallbackEvent, reason_code: str) -> None:
+    try:
+        record_mpesa_paybill_processing_failure(event, reason_code)
+    except Exception:
+        logger.error("mpesa_paybill_failure_audit_failed reason=%s", reason_code)
+
+
 @csrf_exempt
 def mpesa_missing_token(request, *args, **kwargs):
     return _json_error("not_found", 404)
@@ -139,10 +150,30 @@ def _mpesa_callback(request, token: str, event_type: str) -> JsonResponse:
     except (UnicodeDecodeError, ValueError, RecursionError):
         return _json_error("malformed_json", 400)
     try:
-        capture_mpesa_callback(event_type, payload)
+        captured = capture_mpesa_callback(event_type, payload)
     except Exception:
-        logger.exception("mpesa_callback_capture_failed event_type=%s", event_type)
+        logger.error("mpesa_callback_capture_failed event_type=%s", event_type)
         return _json_error("callback_capture_failed", 500)
+    if captured.conflicting_duplicate:
+        return _mpesa_ack(event_type)
+    if (
+        settings.MPESA_PAYBILL_INGESTION_ENABLED
+        and event_type == MpesaCallbackEvent.EVENT_C2B_CONFIRMATION
+    ):
+        try:
+            process_mpesa_paybill_confirmation_event(captured.event)
+        except PaybillProfileUnavailable:
+            _record_callback_processing_failure(captured.event, "profile_unavailable")
+            logger.error("mpesa_paybill_processing_failed reason=profile_unavailable")
+            return _json_error("callback_processing_failed", 500)
+        except ValidationError:
+            _record_callback_processing_failure(captured.event, "canonical_conflict")
+            logger.error("mpesa_paybill_processing_failed reason=canonical_conflict")
+            return _json_error("callback_processing_failed", 500)
+        except Exception:
+            _record_callback_processing_failure(captured.event, "unexpected_failure")
+            logger.error("mpesa_paybill_processing_failed reason=unexpected_failure")
+            return _json_error("callback_processing_failed", 500)
     return _mpesa_ack(event_type)
 
 
@@ -591,12 +622,24 @@ def mpesa_callback_event_list(request):
 @permission_required("billing.view_mpesacallbackevent", raise_exception=True)
 def mpesa_callback_event_detail(request, pk):
     event = get_object_or_404(MpesaCallbackEvent, pk=pk)
+    payment_link = (
+        MpesaCallbackPaymentLink.objects.select_related("payment")
+        .filter(callback_event=event)
+        .first()
+    )
+    if event.event_type == MpesaCallbackEvent.EVENT_C2B_CONFIRMATION:
+        processing_state = "Linked" if payment_link is not None else "Not processed"
+    else:
+        processing_state = "Evidence only"
     sanitized_payload_json = json.dumps(event.sanitized_payload, indent=2, sort_keys=True)
     return render(
         request,
         "billing/mpesa_callback_event_detail.html",
         {
             "event": event,
+            "payment_link": payment_link,
+            "processing_state": processing_state,
+            "can_view_linked_payment": request.user.has_perm("billing.view_payment"),
             "sanitized_payload_json": sanitized_payload_json,
         },
     )
@@ -751,6 +794,13 @@ def payment_detail(request, pk):
         and unmatched_case.status == UnmatchedPaymentCase.STATUS_OPEN
         and _has_permissions(request.user, UNMATCHED_RESOLUTION_PERMISSIONS)
     )
+    source_callback_link = None
+    if request.user.has_perm("billing.view_mpesacallbackevent"):
+        source_callback_link = (
+            MpesaCallbackPaymentLink.objects.select_related("callback_event")
+            .filter(payment=payment)
+            .first()
+        )
     return render(
         request,
         "billing/payment_detail.html",
@@ -762,6 +812,7 @@ def payment_detail(request, pk):
             "can_view_allocation_details": can_view_allocation_details,
             "can_view_unmatched_case": can_view_unmatched_case,
             "can_resolve_unmatched": can_resolve_unmatched,
+            "source_callback_link": source_callback_link,
         },
     )
 

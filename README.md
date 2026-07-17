@@ -2,9 +2,9 @@
 
 SuperSurf Billing is a planned Kenya-first ISP billing and subscriber-management platform for SuperSurf.
 
-This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, the Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, the Phase 6 wallet ledger foundation, Phase 7 Wallet-funded activation and renewal charges, and the Phase 8 canonical payment foundation.
+This repository now contains Phase 0 documentation, Phase 0.5 architectural corrections, the Phase 1 lean Django foundation, the Phase 1.1 security-hardening correction, the Phase 2 package catalog, the Phase 3 subscriber registry, Phase 4 package assignments, Phase 5 billing periods, the Phase 6 wallet ledger foundation, Phase 7 Wallet-funded activation and renewal charges, the Phase 8 canonical payment foundation, Phase 9 Daraja sandbox callback evidence capture, and the explicitly approved Phase 9.1 sandbox Paybill adapter.
 
-Phase 8 deliberately adds only provider-neutral payment records, fake-provider ingestion for development and tests, account-reference matching, account-level Wallet credits, and unmatched-payment resolution. It does not include Safaricom or Daraja calls, M-PESA callbacks, Paybill or Till credentials, STK Push, reconciliation imports, invoices, receipts, discounts, automatic Wallet spending, automatic renewals, automatic expiry, automatic suspension, FreeRADIUS provisioning, PPPoE credentials, RouterOS integration, network provisioning, customer portals, notifications, or live network actions.
+Phase 9 is complete for inbound sandbox callback evidence. Phase 9.1 may, only when explicitly enabled in public LAB, turn a valid sandbox Paybill `c2b_confirmation` into a canonical Payment through the existing account-reference matching, Wallet-credit, and unmatched-case rules. Validation and STK callbacks remain evidence only. Till, production M-PESA, outbound Daraja calls, reconciliation, invoices, receipts, automatic Wallet spending, automatic renewal, network enforcement, and Phase 9.2 remain blocked.
 
 ## Current Deliverables
 
@@ -41,19 +41,21 @@ Phase 8 deliberately adds only provider-neutral payment records, fake-provider i
 - Phase 6 account-level wallets, append-only ledger entries, manual credits/debits, reversals, and duplicate-operation protection
 - Phase 7 Wallet-funded activation and renewal charges with immutable `BillingCharge` records, billing-charge ledger debits, exact subscription snapshot pricing, and PostgreSQL concurrency coverage
 - Phase 8 canonical payments, fake payment ingestion, account-reference matching, Wallet payment credits, unmatched-payment resolution, and PostgreSQL concurrency coverage
+- Phase 9 append-only Daraja sandbox callback evidence, sanitized payload capture, and read-only operator review
+- Phase 9.1 gated sandbox Paybill confirmation processing, system accounting provenance, and callback-to-payment links
 - GitHub Actions CI
 
 ## Phase Boundary
 
-Phase 8 is complete only for canonical payment records, fake-provider ingestion, account-level Wallet payment credits, and unmatched-payment resolution. Matched payments credit the subscriber account Wallet, unmatched payments remain valid payment records, partial and overpayments remain Wallet credit, and service renewal remains a separate operator action. Do not begin the next phase without explicit owner approval.
+Phase 9 callback evidence is complete. Phase 9.1 was explicitly approved only for sandbox Paybill C2B confirmation processing in public LAB. Matched payments credit the subscriber account Wallet, unmatched payments remain valid payment records, and service renewal remains a separate operator action. Do not begin Phase 9.2 or any later phase without explicit Owner approval.
 
 Still absent:
 
-- M-PESA implementation
 - Safaricom or Daraja network calls
 - Paybill or Till credentials
-- M-PESA callbacks
-- STK Push
+- Till payment processing
+- Production M-PESA processing
+- STK Push or STK payment processing
 - Reconciliation imports
 - Discounts
 - Invoices
@@ -112,6 +114,8 @@ Start with:
 14. `docs/implementation/phase-6-wallet-ledger.md`
 15. `docs/implementation/phase-7-wallet-funded-renewals.md`
 16. `docs/implementation/phase-8-payment-foundation.md`
+17. `docs/implementation/phase-9-daraja-callback-evidence.md`
+18. `docs/implementation/phase-9-1-sandbox-paybill-adapter.md`
 
 ## Production Readiness
 

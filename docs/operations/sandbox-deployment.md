@@ -1,6 +1,6 @@
 # Sandbox Deployment
 
-This document describes the SuperSurf sandbox deployment foundation. It is sandbox infrastructure, not production infrastructure. Phase 9 adds inbound Daraja sandbox callback evidence capture only. It does not create canonical payments, Wallet credits, billing periods, renewals, invoices, receipts, network access, or production Daraja integrations. No production payment credentials should be stored here.
+This document describes the SuperSurf sandbox deployment foundation. It is sandbox infrastructure, not production infrastructure. Phase 9 captures inbound Daraja sandbox evidence. The explicitly approved Phase 9.1 adapter can process only enabled sandbox Paybill C2B confirmations into canonical Payments and Wallet credits or unmatched cases. It does not process validation or STK callbacks and does not add production Daraja, Till, renewal, invoice, receipt, or network behavior. No production payment credentials should be stored here.
 
 ## Purpose And Scope
 
@@ -95,11 +95,15 @@ DJANGO_DEBUG=false
 DJANGO_ALLOWED_HOSTS=sandbox.supersurf.co.ke,sandbox-api.supersurf.co.ke
 DJANGO_CSRF_TRUSTED_ORIGINS=https://sandbox.supersurf.co.ke,https://sandbox-api.supersurf.co.ke
 SECURE_HSTS_SECONDS=0
+MPESA_PAYBILL_INGESTION_ENABLED=false
+MPESA_PAYBILL_EXTERNAL_IDENTIFIER=
 ```
 
 `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`, and `MPESA_CALLBACK_TOKEN` are generated cryptographically on the VPS when absent and preserved across later deployments. `MPESA_CALLBACK_TOKEN` is generated with `openssl rand -hex 32`; it is required for public LAB deployments, must be at least 32 characters, and must never be printed by deployment or CI output.
 
-Do not add Daraja credentials, M-PESA credentials, consumer keys, consumer secrets, passkeys, Paybill numbers, sandbox tokens, or fake production credentials. The callback token is a path secret stored only in the VPS `sandbox.env`; it is not a Daraja credential and must still be treated as secret.
+`MPESA_PAYBILL_INGESTION_ENABLED` and `MPESA_PAYBILL_EXTERNAL_IDENTIFIER` are preserved but never generated or printed. They default to false and empty. Only the Owner-approved sandbox operator may place the actual sandbox identifier directly into the mode-600 environment file and set the flag true. Deployment runs `sync_mpesa_paybill_profile` after migrations and `seed_roles`; disabled configuration is a no-op, and enabled conflicting profile identity stops deployment safely.
+
+Do not commit Daraja credentials, M-PESA credentials, consumer keys, consumer secrets, passkeys, Paybill numbers, sandbox tokens, or fake production credentials. The callback token is a path secret stored only in the VPS `sandbox.env`; it is not a Daraja credential and must still be treated as secret. The approved sandbox Paybill identifier also remains only in that environment file and is never copied into repository files, logs, screenshots, tickets, or chat.
 
 ## Public LAB Security
 
@@ -215,7 +219,13 @@ https://sandbox.supersurf.co.ke/mpesa-callbacks/
 
 The list and detail pages display only the event envelope, extracted safe fields, and sanitized payload JSON. The reviewed pages did not display the callback token, callback URL, raw request body, request headers, cookies, client IP address, session data, credentials, or unredacted telephone, name, or balance fields.
 
-This evidence proves callback registration, delivery, and safe evidence capture only. The evidence capture phase intentionally does not interpret a successful acknowledgement or provider response as payment, does not create `Payment` records, does not credit Wallets or mutate the ledger, does not create `BillingPeriod` or `BillingCharge` records, does not activate or renew services, does not reconcile transactions, and does not establish production readiness. Callback payloads should be inspected through the operator UI and must never be pasted into normal application logs.
+This evidence proves Phase 9 callback registration, delivery, and safe evidence capture only. It predates Phase 9.1 and is not a live canonical-payment test. Callback payloads should be inspected through the operator UI and must never be pasted into normal application logs.
+
+When Phase 9.1 is explicitly enabled and its profile has synchronized, only a valid Paybill `c2b_confirmation` can create or locate a canonical Payment. Validation and STK callbacks remain evidence only. The confirmation either creates one exact account-Wallet credit or one open unmatched case, then creates one append-only callback-payment link. It never creates billing periods, billing charges, activation, renewal, reconciliation, invoices, receipts, or network state.
+
+The live Phase 9.1 test remains pending until the Owner deploys and performs one controlled sandbox transaction. Do not represent the earlier Phase 9 evidence transaction or automated tests as completing that check.
+
+To disable processing, set only `MPESA_PAYBILL_INGESTION_ENABLED=false` in the mode-600 environment file and redeploy. Preserve the identifier privately so a later approved re-enable can validate the same identity. Evidence capture continues, historical accounting is not changed, and no callback is retroactively processed.
 
 ## Revision Tracking
 

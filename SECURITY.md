@@ -94,11 +94,11 @@ Wallet-funded charges are not payment records, receipts, invoices, discounts, au
 
 ## Payment Foundation Security
 
-Phase 8 payment ingestion is fake-provider only. Active fake provider profiles in `test` or `sandbox` environments may ingest through the development workflow; fake ingestion is blocked when `SUPERSURF_ENVIRONMENT=PRODUCTION`. Structural M-PESA provider profiles may exist for future modelling, but they cannot ingest payments in this phase.
+Phase 8 fake ingestion remains limited to active fake profiles in `test` or `sandbox` and is blocked in production. Phase 9.1 adds a separate internal path only for an explicitly enabled public-LAB M-PESA Paybill sandbox confirmation. Production, Till, STK payment processing, and general actor-free payment ingestion remain blocked.
 
 Payment records store provider-neutral identifiers, integer KES minor-unit amounts, aware received timestamps, optional account references, and optional SHA-256 payload digests. Provider transaction identifiers are trimmed by the service/model and empty values are rejected by both validation and a database check constraint. Payment records do not store raw callback payloads, full payer phone numbers, access tokens, credentials, card data, bank credentials, mutable payment status, service package links, billing-period links, invoices, or receipts.
 
-`Payment` and `PaymentAllocation` records are immutable and append-only in application code after creation, including their creation timestamps. Model save, queryset update, bulk update, model delete, and queryset delete paths are rejected. Direct database access remains outside these application controls.
+`Payment` and `PaymentAllocation` records are immutable and append-only in application code after creation, including their creation timestamps. Model save, queryset update, bulk update, model delete, and queryset delete paths are rejected. Ledger entries and allocations record immutable `operator` or `system` provenance. Operator rows require a human `created_by`; system rows require it to be null, with database checks enforcing both combinations. System creation is limited to the dedicated sandbox Paybill payment-credit path. Direct database access remains outside these application controls.
 
 Payment allocation is full-wallet credit only in Phase 8. Matched account references credit the subscriber account-level Wallet with a `payment_credit` ledger entry. Partial and overpayments remain Wallet credit. Payment ingestion does not create billing periods, billing charges, invoices, receipts, renewals, network access, suspension, RADIUS records, PPPoE credentials, RouterOS calls, or provisioning jobs.
 
@@ -114,11 +114,11 @@ Administrator and Finance can ingest fake payments and resolve unmatched cases. 
 
 ## Daraja Callback Evidence Security
 
-Phase 9 callback receivers are inbound evidence capture only. They prove Daraja sandbox reachability, callback shape, acknowledgement behavior, redaction, hashing, and idempotency before a later provider-specific adapter is allowed to create canonical payments.
+Phase 9 callback receivers capture inbound evidence. Phase 9.1 may process only a valid sandbox Paybill `c2b_confirmation` when the feature is explicitly enabled in public LAB. C2B validation, every STK result, disabled ingestion, mismatched identifiers, Till, and production remain evidence only.
 
 Callback URLs use `MPESA_CALLBACK_TOKEN` as an unguessable path segment because Daraja callbacks cannot be assumed to include a custom authentication header. The token is required for public LAB, must be at least 32 characters, is generated only into the VPS `sandbox.env` when absent, is preserved on later deployments, and must not be committed, printed by deployment, pasted into logs, or included in screenshots or tickets. Incorrect or missing tokens return HTTP 404.
 
-`MpesaCallbackEvent` records store an event type, canonical payload SHA-256 digest, unique idempotency key, sanitized JSON payload, safe extracted provider identifiers, optional amount, optional result code, optional bounded result description, received timestamp, and creation timestamp. They do not store raw request bodies, request headers, cookies, client IP addresses, browser sessions, callback tokens, full phone numbers, customer names, credentials, secrets, or balances.
+`MpesaCallbackEvent` records store an event type, canonical payload SHA-256 digest, unique idempotency key, sanitized JSON payload, normalized `BusinessShortCode` in a provider-neutral field, other safe extracted identifiers, optional amount, optional result code, optional bounded result description, received timestamp, and creation timestamp. They do not store raw request bodies, request headers, cookies, client IP addresses, browser sessions, callback tokens, full phone numbers, customer names, credentials, secrets, or unredacted balances.
 
 Sanitization recursively redacts values for sensitive keys such as phone, MSISDN, customer-name parts, balances, credentials, passwords, passkeys, secrets, tokens, and authorization fields while preserving safe provider identifiers such as `TransID`, `MpesaReceiptNumber`, `BillRefNumber`, `AccountReference`, `MerchantRequestID`, and `CheckoutRequestID`.
 
@@ -126,7 +126,11 @@ Sanitization recursively redacts values for sensitive keys such as phone, MSISDN
 
 `billing.view_mpesacallbackevent` exposes only read-only list/detail pages and sanitized payloads. Administrator and Finance receive that permission; Support, Read Only, and NOC do not. No ordinary role receives add, change, or delete permissions for callback events.
 
-Phase 9 callbacks do not create `Payment` records, Wallet credits, ledger entries, billing periods, billing charges, invoices, receipts, renewals, service activation, RADIUS records, PPPoE credentials, RouterOS calls, provisioning jobs, or network actions.
+Equivalent duplicate payloads reuse the immutable evidence row. A duplicate idempotency key with a changed digest is recorded only as a bounded conflict outcome and cannot mutate evidence or enter payment processing. Logs and audit metadata exclude callback URLs and tokens, payload JSON, configured external identifiers, shortcodes, phone numbers, names, provider balances, credentials, headers, cookies, sessions, client addresses, and exception text.
+
+`MpesaCallbackPaymentLink` is append-only and one-to-one with both a confirmation event and canonical Payment. Its protected links and model validation require matching sandbox Paybill provider identity, transaction, exact amount, normalized reference, and digest. Administrator and Finance receive read-only link visibility. Payment pages reveal callback provenance only with `billing.view_mpesacallbackevent`, and callback pages link to Payments only with `billing.view_payment`.
+
+Phase 9.1 confirmations do not create billing periods, billing charges, invoices, receipts, renewals, service activation, RADIUS records, PPPoE credentials, RouterOS calls, provisioning jobs, or network actions.
 
 ## Audit Immutability Boundary
 

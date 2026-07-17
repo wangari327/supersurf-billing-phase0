@@ -62,8 +62,8 @@
           <p class="font-medium">{{ allocation.pk }}</p>
         </div>
         <div>
-          <p class="text-sm text-slate-600">Operator</p>
-          <p class="font-medium">{{ allocation.created_by.username }}</p>
+          <p class="text-sm text-slate-600">Created by</p>
+          <p class="font-medium">{% if allocation.creation_source == "system" %}System{% else %}{{ allocation.created_by.username }}{% endif %}</p>
         </div>
       </div>
     </section>
@@ -79,6 +79,13 @@
       {% if can_resolve_unmatched %}
         <a class="btn mt-3" href="{% url 'unmatched_payment_resolve' unmatched_case.pk %}">Resolve</a>
       {% endif %}
+    </section>
+  {% endif %}
+
+  {% if source_callback_link %}
+    <section class="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+      <h2 class="font-semibold">Source callback</h2>
+      <a class="mt-2 inline-block text-sm font-medium text-sky-700 hover:text-sky-900" href="{% url 'mpesa_callback_event_detail' source_callback_link.callback_event_id %}">View callback evidence</a>
     </section>
   {% endif %}
 

@@ -2,7 +2,7 @@
 
 This is a Phase 0.5 logical model, not a production migration.
 
-## Implemented Through Phase 8
+## Implemented Through Phase 9.1
 
 ```mermaid
 erDiagram
@@ -31,6 +31,8 @@ erDiagram
     PAYMENT_PROVIDER_PROFILE ||--o{ PAYMENT : identifies
     PAYMENT ||--o| PAYMENT_ALLOCATION : allocates
     PAYMENT ||--o| UNMATCHED_PAYMENT_CASE : may_open
+    MPESA_CALLBACK_EVENT ||--o| MPESA_CALLBACK_PAYMENT_LINK : sources
+    PAYMENT ||--o| MPESA_CALLBACK_PAYMENT_LINK : evidenced_by
     PAYMENT_ALLOCATION ||--o| UNMATCHED_PAYMENT_CASE : resolves
 
     ORGANIZATION {
@@ -136,6 +138,7 @@ erDiagram
         uuid previous_entry_id
         uuid reverses_entry_id
         string reason
+        string creation_source
         int created_by_id
         datetime created_at
     }
@@ -170,6 +173,7 @@ erDiagram
         string allocation_type
         int amount_minor
         string currency
+        string creation_source
         int created_by_id
         datetime created_at
     }
@@ -184,6 +188,25 @@ erDiagram
         int resolved_by_id
         datetime opened_at
         datetime resolved_at
+    }
+    MPESA_CALLBACK_EVENT {
+        uuid id
+        string event_type
+        string payload_sha256
+        string idempotency_key
+        json sanitized_payload
+        string provider_external_identifier
+        string provider_transaction_id
+        string account_reference
+        decimal amount
+        datetime received_at
+        datetime created_at
+    }
+    MPESA_CALLBACK_PAYMENT_LINK {
+        uuid id
+        uuid callback_event_id
+        uuid payment_id
+        datetime created_at
     }
     BILLING_CHARGE {
         uuid id
@@ -204,7 +227,7 @@ erDiagram
 
 `SUBSCRIPTION` is manual package-assignment history. `BILLING_PERIOD` is append-only access-period history with subscription snapshots, manual uncharged activation and renewal, Wallet-funded activation and renewal, and derived billing state. `WALLET` and `LEDGER_ENTRY` are account-level accounting records. `BILLING_CHARGE` links one Wallet-funded billing period to one billing-charge ledger debit.
 
-`PAYMENT` is a provider-neutral canonical transaction. Phase 8 supports only fake-provider ingestion and one full `PAYMENT_ALLOCATION` to an account-level Wallet through a `payment_credit` ledger entry. `UNMATCHED_PAYMENT_CASE` records valid payments that could not be matched safely to an `SS000001`-style account reference. Manual wallet credits do not claim payment receipt, manual debits are not package charges or invoices, and Wallet-funded charges are not invoices or receipts. Real M-PESA adapters, Safaricom or Daraja calls, Paybill or Till credentials, invoices, receipts, discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, installation, and equipment entities remain future work.
+`PAYMENT` is a provider-neutral canonical transaction. Phase 8 supports fake-provider ingestion. Phase 9 stores immutable callback evidence, and Phase 9.1 permits only enabled public-LAB sandbox Paybill confirmations to create canonical Payments. `MPESA_CALLBACK_PAYMENT_LINK` records one append-only evidence source for one Payment. `PAYMENT_ALLOCATION` and `LEDGER_ENTRY` distinguish operator and system provenance. `UNMATCHED_PAYMENT_CASE` records valid payments that could not be matched safely to an `SS000001`-style account reference. Till, production M-PESA, STK payment processing, reconciliation, invoices, receipts, discounts, automatic renewals, automatic suspension, PPPoE credentials, RADIUS, RouterOS, provisioning, installation, and equipment entities remain future work.
 
 ## Future Logical Model
 

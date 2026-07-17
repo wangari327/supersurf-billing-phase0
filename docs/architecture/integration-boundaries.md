@@ -2,6 +2,8 @@
 
 External dependencies must be wrapped behind internal interfaces.
 
+Phase 9.1 is an inbound-only exception with no external client: the HTTP callback view captures immutable evidence, then a dedicated internal sandbox Paybill service reads that event and calls the private provider-neutral canonical payment core. It does not implement `MpesaProvider`, authenticate to Daraja, or make an outbound network request. The broader interfaces below remain future boundaries.
+
 ## Required Interfaces
 
 | Interface | Purpose |
@@ -30,4 +32,3 @@ Where no trustworthy maintained package exists, build only a thin integration us
 - Document rejected wrappers.
 
 Do not write custom HTTP stacks, OAuth frameworks, cryptographic algorithms, webhook frameworks, database drivers, or task queues.
-

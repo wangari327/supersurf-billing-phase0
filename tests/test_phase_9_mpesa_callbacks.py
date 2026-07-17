@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 from threading import Barrier
+from urllib.parse import urlsplit
 
 import pytest
 from django.contrib.auth.models import Group
@@ -16,7 +18,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from audit.logging import redact_text
+from audit.logging import SecretRedactionFilter, redact_log_value, redact_text
 from billing.models import (
     BillingCharge,
     BillingPeriod,
@@ -39,7 +41,28 @@ from users.roles import (
 )
 
 TOKEN = "a" * 64
-BASE_URL = "https://sandbox-api.supersurf.co.ke"
+BASE_URL = "https://callbacks.example.test"
+
+TOKENIZED_CALLBACK_ROUTES = [
+    (
+        "mpesa_c2b_validation_callback",
+        "/api/payment-callbacks/<token>/c2b/validation/",
+    ),
+    (
+        "mpesa_c2b_confirmation_callback",
+        "/api/payment-callbacks/<token>/c2b/confirmation/",
+    ),
+    (
+        "mpesa_stk_callback",
+        "/api/payment-callbacks/<token>/stk/callback/",
+    ),
+]
+
+MISSING_TOKEN_CALLBACK_ROUTES = [
+    "mpesa_c2b_validation_missing_token",
+    "mpesa_c2b_confirmation_missing_token",
+    "mpesa_stk_callback_missing_token",
+]
 
 
 def c2b_payload(**overrides):
@@ -109,6 +132,17 @@ def create_test_subscriber() -> Subscriber:
     return create_subscriber(form=form, actor=None)
 
 
+@pytest.mark.parametrize(("route_name", "expected_path"), TOKENIZED_CALLBACK_ROUTES)
+def test_tokenized_callback_routes_use_provider_neutral_public_paths(
+    route_name,
+    expected_path,
+):
+    sanitized_path = reverse(route_name, args=[TOKEN]).replace(TOKEN, "<token>")
+
+    assert sanitized_path == expected_path
+    assert "mpesa" not in sanitized_path.lower()
+
+
 @pytest.mark.django_db
 @override_settings(MPESA_CALLBACK_TOKEN=TOKEN)
 def test_correct_callback_token_accepted(client):
@@ -121,22 +155,46 @@ def test_correct_callback_token_accepted(client):
 
 @pytest.mark.django_db
 @override_settings(MPESA_CALLBACK_TOKEN=TOKEN)
-def test_incorrect_callback_token_returns_404(client):
-    response = post_json(client, "mpesa_c2b_validation_callback", c2b_payload(), token="wrong")
+@pytest.mark.parametrize(("route_name", "expected_path"), TOKENIZED_CALLBACK_ROUTES)
+def test_incorrect_callback_token_returns_safe_404(client, route_name, expected_path):
+    response = post_json(client, route_name, c2b_payload(), token="wrong")
 
+    assert reverse(route_name, args=["wrong"]) == expected_path.replace("<token>", "wrong")
     assert response.status_code == 404
+    assert response.json() == {"error": "not_found"}
     assert response["content-type"].startswith("application/json")
     assert MpesaCallbackEvent.objects.count() == 0
 
 
 @pytest.mark.django_db
 @override_settings(MPESA_CALLBACK_TOKEN=TOKEN)
-def test_missing_token_route_returns_404(client):
+@pytest.mark.parametrize("route_name", MISSING_TOKEN_CALLBACK_ROUTES)
+def test_missing_token_routes_return_safe_404(client, route_name):
     response = client.post(
-        reverse("mpesa_c2b_validation_missing_token"),
+        reverse(route_name),
         data=json.dumps(c2b_payload()),
         content_type="application/json",
     )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "not_found"}
+    assert response["content-type"].startswith("application/json")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/integrations/mpesa/not-configured/c2b/validation/",
+        "/api/integrations/mpesa/not-configured/c2b/confirmation/",
+        "/api/integrations/mpesa/not-configured/stk/callback/",
+        "/api/integrations/mpesa/c2b/validation/",
+        "/api/integrations/mpesa/c2b/confirmation/",
+        "/api/integrations/mpesa/stk/callback/",
+    ],
+)
+def test_old_callback_paths_are_not_resolved(client, path):
+    response = client.post(path, data="{}", content_type="application/json")
 
     assert response.status_code == 404
 
@@ -191,6 +249,25 @@ def test_oversized_request_returns_413(client):
 
 @pytest.mark.django_db
 @override_settings(MPESA_CALLBACK_TOKEN=TOKEN)
+def test_persistence_failure_returns_safe_500_without_token_leakage(client, monkeypatch, caplog):
+    def fail_capture(*args, **kwargs):
+        raise RuntimeError("synthetic callback persistence failure")
+
+    monkeypatch.setattr("billing.views.capture_mpesa_callback", fail_capture)
+    with caplog.at_level("ERROR", logger="billing.views"):
+        response = post_json(client, "mpesa_c2b_validation_callback", c2b_payload())
+
+    application_logs = "\n".join(
+        record.getMessage() for record in caplog.records if record.name == "billing.views"
+    )
+    assert response.status_code == 500
+    assert response.json() == {"error": "callback_capture_failed"}
+    assert "synthetic callback persistence failure" not in response.content.decode()
+    assert TOKEN not in application_logs
+
+
+@pytest.mark.django_db
+@override_settings(MPESA_CALLBACK_TOKEN=TOKEN)
 def test_c2b_validation_capture(client):
     payload = c2b_payload(TransID="P9VALIDATE")
 
@@ -203,6 +280,7 @@ def test_c2b_validation_capture(client):
     assert event.account_reference == "SS000001"
     assert event.amount == Decimal("1200.00")
     assert event.payload_sha256 == payload_digest(payload)
+    assert event.idempotency_key == "c2b_validation:P9VALIDATE"
 
 
 @pytest.mark.django_db
@@ -216,6 +294,7 @@ def test_c2b_confirmation_capture(client):
     assert response.status_code == 200
     assert event.event_type == MpesaCallbackEvent.EVENT_C2B_CONFIRMATION
     assert event.provider_transaction_id == "P9CONFIRM"
+    assert event.idempotency_key == "c2b_confirmation:P9CONFIRM"
 
 
 @pytest.mark.django_db
@@ -234,6 +313,7 @@ def test_successful_stk_result_capture(client):
     assert event.amount == Decimal("1500.00")
     assert event.result_code == "0"
     assert event.result_description == "The service request is processed successfully."
+    assert event.idempotency_key == "stk_result:ws_CO_010220261030001234567890"
 
 
 @pytest.mark.django_db
@@ -345,12 +425,25 @@ def test_no_sensitive_values_in_captured_logs(client, caplog):
     ["c2b/validation/", "c2b/confirmation/", "stk/callback/"],
 )
 def test_framework_log_redaction_masks_callback_url_token(suffix):
-    message = f"Request failed: /api/integrations/mpesa/{TOKEN}/{suffix}"
+    message = f"Request failed: /api/payment-callbacks/{TOKEN}/{suffix}"
+    record = logging.LogRecord(
+        name="django.request",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=1,
+        msg=message,
+        args=(),
+        exc_info=None,
+    )
 
     redacted = redact_text(message)
+    redacted_exception = redact_log_value(RuntimeError(message))
+    assert SecretRedactionFilter().filter(record)
 
     assert TOKEN not in redacted
-    assert f"/api/integrations/mpesa/[redacted]/{suffix}" in redacted
+    assert TOKEN not in redacted_exception
+    assert TOKEN not in record.getMessage()
+    assert f"/api/payment-callbacks/[redacted]/{suffix}" in redacted
 
 
 @pytest.mark.django_db
@@ -363,6 +456,8 @@ def test_duplicate_callbacks_create_one_row(client):
 
     assert first.status_code == 200
     assert second.status_code == 200
+    assert first.json() == {"ResultCode": 0, "ResultDesc": "Accepted"}
+    assert second.json() == first.json()
     assert MpesaCallbackEvent.objects.count() == 1
 
 
@@ -458,17 +553,40 @@ def test_successful_callback_does_not_create_payment_wallet_billing_or_renewal(
 
 
 @pytest.mark.django_db
-@override_settings(MPESA_CALLBACK_TOKEN=TOKEN, MPESA_CALLBACK_BASE_URL=BASE_URL)
-def test_callback_url_command_outputs_urls_and_missing_token_fails():
+@override_settings(
+    MPESA_CALLBACK_TOKEN=TOKEN,
+    MPESA_CALLBACK_BASE_URL=BASE_URL,
+    SUPERSURF_ENVIRONMENT="LAB",
+    SUPERSURF_PUBLIC_DEPLOYMENT=True,
+)
+def test_callback_url_command_outputs_only_provider_neutral_https_urls():
     output = StringIO()
 
     call_command("show_mpesa_callback_urls", stdout=output)
 
     text = output.getvalue()
-    assert f"{BASE_URL}/api/integrations/mpesa/{TOKEN}/c2b/validation/" in text
-    assert f"{BASE_URL}/api/integrations/mpesa/{TOKEN}/c2b/confirmation/" in text
-    assert f"{BASE_URL}/api/integrations/mpesa/{TOKEN}/stk/callback/" in text
+    lines = text.splitlines()
+    urls = [line.split(": ", maxsplit=1)[1] for line in lines]
+    sanitized_lines = [line.replace(TOKEN, "<token>") for line in lines]
+
+    assert sanitized_lines == [
+        f"C2B Validation URL: {BASE_URL}/api/payment-callbacks/<token>/c2b/validation/",
+        f"C2B Confirmation URL: {BASE_URL}/api/payment-callbacks/<token>/c2b/confirmation/",
+        f"STK Callback URL: {BASE_URL}/api/payment-callbacks/<token>/stk/callback/",
+    ]
+    assert len(urls) == 3
+    assert all(urlsplit(url).scheme == "https" and urlsplit(url).netloc for url in urls)
+    assert all("mpesa" not in url.lower() for url in urls)
     assert "consumer" not in text.lower()
+
+
+@pytest.mark.parametrize("invalid_base_url", ["", "http://callbacks.example.test"])
+@override_settings(MPESA_CALLBACK_TOKEN=TOKEN)
+def test_callback_url_command_fails_for_invalid_configuration(invalid_base_url):
+    with override_settings(MPESA_CALLBACK_BASE_URL=invalid_base_url):
+        with pytest.raises(CommandError):
+            call_command("show_mpesa_callback_urls", stdout=StringIO())
+
     with override_settings(MPESA_CALLBACK_TOKEN=""):
         with pytest.raises(CommandError):
             call_command("show_mpesa_callback_urls", stdout=StringIO())
@@ -535,3 +653,6 @@ def test_concurrent_postgresql_duplicate_callbacks_create_one_event():
 
     assert len(set(results)) == 1
     assert MpesaCallbackEvent.objects.count() == 1
+    event = MpesaCallbackEvent.objects.get()
+    assert event.idempotency_key == "c2b_validation:P9CONCURRENT"
+    assert event.payload_sha256 == payload_digest(payload)

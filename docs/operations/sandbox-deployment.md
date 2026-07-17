@@ -173,9 +173,9 @@ Application logs must not contain credentials, tokens, payment secrets, request 
 Phase 9 exposes three unauthenticated-by-session callback routes on the API hostname. Daraja callbacks cannot be assumed to carry a custom authentication header, so each route uses an unguessable token path segment:
 
 ```text
-https://sandbox-api.supersurf.co.ke/api/integrations/mpesa/<token>/c2b/validation/
-https://sandbox-api.supersurf.co.ke/api/integrations/mpesa/<token>/c2b/confirmation/
-https://sandbox-api.supersurf.co.ke/api/integrations/mpesa/<token>/stk/callback/
+https://sandbox-api.supersurf.co.ke/api/payment-callbacks/<token>/c2b/validation/
+https://sandbox-api.supersurf.co.ke/api/payment-callbacks/<token>/c2b/confirmation/
+https://sandbox-api.supersurf.co.ke/api/payment-callbacks/<token>/stk/callback/
 ```
 
 The endpoints accept JSON `POST` requests only, reject malformed JSON with HTTP 400, reject oversized bodies above 64 KiB with HTTP 413, and return HTTP 404 for missing or incorrect tokens. Accepted C2B validation, C2B confirmation, and STK result callbacks return JSON:
@@ -201,7 +201,9 @@ sudo env \
 
 Do not paste the printed URLs into GitHub issues, normal logs, screenshots, support tickets, or chat channels because the token is embedded in the path.
 
-Register the printed C2B Validation and C2B Confirmation URLs in the Daraja sandbox portal for the sandbox Paybill test. For the initial controlled C2B simulator test, use `SS000001` as the Bill Reference Number so account-reference extraction can be verified without tying the callback to payment processing. Put the printed STK Callback URL into the Daraja STK simulator callback field when capturing STK result evidence.
+On 2026-07-17, the Daraja 3.0 sandbox C2B Register URL form rejected the attempted validation URL because it contained the word "MPESA". The portal displayed provider-neutral HTTPS confirmation and validation examples, so the public routes now use the neutral `/api/payment-callbacks/` prefix. This is a URL compatibility correction only.
+
+The corrected routes have not yet been manually deployed or registered. After deployment, register the printed C2B Validation and C2B Confirmation URLs in the Daraja sandbox portal for the sandbox Paybill test. For the initial controlled C2B simulator test, use `SS000001` as the Bill Reference Number so account-reference extraction can be verified without tying the callback to payment processing. Put the printed STK Callback URL into the Daraja STK simulator callback field when capturing STK result evidence. Registration, simulation, and callback delivery remain pending operator verification.
 
 Captured events are visible to operators with `billing.view_mpesacallbackevent` at:
 

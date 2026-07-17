@@ -6,32 +6,32 @@ from . import views
 
 urlpatterns = [
     path(
-        "api/integrations/mpesa/c2b/validation/",
+        "api/payment-callbacks/c2b/validation/",
         views.mpesa_missing_token,
         name="mpesa_c2b_validation_missing_token",
     ),
     path(
-        "api/integrations/mpesa/c2b/confirmation/",
+        "api/payment-callbacks/c2b/confirmation/",
         views.mpesa_missing_token,
         name="mpesa_c2b_confirmation_missing_token",
     ),
     path(
-        "api/integrations/mpesa/stk/callback/",
+        "api/payment-callbacks/stk/callback/",
         views.mpesa_missing_token,
         name="mpesa_stk_callback_missing_token",
     ),
     path(
-        "api/integrations/mpesa/<str:token>/c2b/validation/",
+        "api/payment-callbacks/<str:token>/c2b/validation/",
         views.mpesa_c2b_validation_callback,
         name="mpesa_c2b_validation_callback",
     ),
     path(
-        "api/integrations/mpesa/<str:token>/c2b/confirmation/",
+        "api/payment-callbacks/<str:token>/c2b/confirmation/",
         views.mpesa_c2b_confirmation_callback,
         name="mpesa_c2b_confirmation_callback",
     ),
     path(
-        "api/integrations/mpesa/<str:token>/stk/callback/",
+        "api/payment-callbacks/<str:token>/stk/callback/",
         views.mpesa_stk_callback,
         name="mpesa_stk_callback",
     ),

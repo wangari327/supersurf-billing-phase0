@@ -7,14 +7,20 @@ Phase 9 adds inbound Safaricom Daraja sandbox callback receivers and append-only
 Callbacks are hosted on the sandbox API hostname and use an unguessable path token:
 
 ```text
-/api/integrations/mpesa/<token>/c2b/validation/
-/api/integrations/mpesa/<token>/c2b/confirmation/
-/api/integrations/mpesa/<token>/stk/callback/
+/api/payment-callbacks/<token>/c2b/validation/
+/api/payment-callbacks/<token>/c2b/confirmation/
+/api/payment-callbacks/<token>/stk/callback/
 ```
 
 The configured public base URL is `MPESA_CALLBACK_BASE_URL`, defaulting to `https://sandbox-api.supersurf.co.ke`. `MPESA_CALLBACK_TOKEN` is required for public LAB deployments, must be at least 32 characters, and is compared with constant-time comparison. Incorrect or missing tokens return HTTP 404 so callback existence is not confirmed.
 
 Each endpoint is CSRF exempt, accepts `POST` only, accepts JSON only, rejects malformed JSON with HTTP 400, rejects request bodies larger than 64 KiB with HTTP 413, returns JSON responses rather than HTML error pages, does not redirect, and does not require an authenticated browser session.
+
+### Daraja Portal Compatibility Evidence
+
+On 2026-07-17, the Daraja 3.0 sandbox C2B Register URL form rejected the attempted validation URL because the URL contained the word "MPESA". The portal's displayed examples used provider-neutral HTTPS confirmation and validation paths. Phase 9 therefore exposes provider-neutral public callback paths under `/api/payment-callbacks/` without changing token authentication, evidence capture, acknowledgements, idempotency, permissions, payload handling, or billing boundaries.
+
+The corrected paths have not yet been deployed or registered by the operator. Successful registration, simulator use, and callback delivery remain pending operator verification.
 
 Accepted C2B validation, C2B confirmation, and STK result callbacks return:
 
@@ -97,6 +103,6 @@ The command fails when the token is missing or shorter than 32 characters. It pr
 
 ## Sandbox Evidence Workflow
 
-Register the printed C2B validation and confirmation URLs in the Daraja sandbox portal. For the first controlled C2B simulator run, use `SS000001` as the Bill Reference Number. Use the printed STK callback URL in the Daraja STK simulator callback field.
+After the correction is manually deployed, register the printed C2B validation and confirmation URLs in the Daraja sandbox portal. For the first controlled C2B simulator run, use `SS000001` as the Bill Reference Number. Use the printed STK callback URL in the Daraja STK simulator callback field. Do not mark registration or delivery as successful until the operator has verified it.
 
 After Daraja posts callbacks, inspect `/mpesa-callbacks/` as an Administrator or Finance operator. Confirm the acknowledgement response, event type, provider identifiers, account reference, amount, result code, deduplication behavior, and sanitized payload structure. Update `docs/research/mpesa-sandbox-evidence-checklist.md` with the reviewed evidence before any later payment adapter phase.

@@ -2,6 +2,14 @@
 
 No M-PESA implementation may begin until this checklist is completed for each SuperSurf provider profile: Paybill sandbox, Paybill production-readiness review, Till sandbox, and Till production-readiness review as applicable.
 
+## 2026-07-17 URL Registration Compatibility Evidence
+
+- The Daraja 3.0 sandbox C2B Register URL form rejected the attempted validation URL because the URL contained the word "MPESA".
+- The portal's displayed examples used provider-neutral HTTPS confirmation and validation paths.
+- Provider-neutral public callback paths under `/api/payment-callbacks/` were implemented in response.
+- Successful deployment, URL registration, simulation, and callback delivery remain pending operator verification.
+- No screenshot, shortcode, account name, callback token, credential, or complete callback URL is recorded here.
+
 ## Product And Profile
 
 - [ ] Product type recorded: Paybill or Till
@@ -57,4 +65,3 @@ No M-PESA implementation may begin until this checklist is completed for each Su
 - [ ] Evidence reviewed by owner
 - [ ] Provider-profile configuration approved for implementation
 - [ ] Remaining ambiguities documented
-

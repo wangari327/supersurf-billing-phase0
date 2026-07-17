@@ -45,7 +45,7 @@ SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
 )
 
 MPESA_CALLBACK_PATH_PATTERN = re.compile(
-    r"(?P<prefix>/api/integrations/mpesa/)[^/\s?#]+"
+    r"(?P<prefix>/api/(?:[^/\s?#]+/){1,2})[^/\s?#]+"
     r"(?P<suffix>/(?:c2b/(?:validation|confirmation)|stk/callback)/?)",
     re.IGNORECASE,
 )

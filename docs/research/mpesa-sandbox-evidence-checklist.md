@@ -14,11 +14,23 @@ No M-PESA implementation may begin until this checklist is completed for each Su
 - The observed STK callback contained no callback metadata; the absent amount, provider transaction identifier, and account reference are an observed provider payload characteristic.
 - No screenshot, PDF, shortcode value, account name, callback token, credential, complete callback URL, telephone number, personal name, provider identifier value, callback-event UUID, or payload digest is recorded here.
 
+## 2026-07-18 Phase 9.1 Live Paybill Acceptance
+
+- The Owner deployed the approved Phase 9.1 commit to the public LAB sandbox; PostgreSQL, the broker, web, Caddy, readiness, and both public HTTPS hosts were healthy.
+- Paybill ingestion was enabled with exactly one active sandbox M-PESA Paybill profile, and the configured profile matched the C2B sandbox identifier used for the successful callback.
+- A mistakenly selected STK sandbox identifier was detected before any canonical Payment existed. Its unused profile had no associated Payments, was deactivated safely, and the correct active Paybill profile was synchronized.
+- Earlier simulator attempts displayed a stale accepted response, but no request reached the VPS and no callback event, Payment, callback-payment link, or Wallet entry was created.
+- C2B validation and confirmation URLs were re-registered for the exact configured Paybill sandbox identifier, and Daraja acknowledged the registration successfully.
+- One fresh controlled `CustomerPayBillOnline` request for `KSh1` with synthetic account reference `SS000001` delivered immediately and created exactly one allocated canonical Payment, one full Wallet allocation, one system-sourced `payment_credit` ledger entry, and one callback-payment link.
+- The subscriber moved from no Wallet and `KSh0` to `KSh1`, had no services, and received no billing-period, billing-charge, activation, renewal, Wallet-spend, invoice, receipt, notification, reconciliation, or network action.
+- Equivalent retries were not forced manually because PostgreSQL automation already verifies idempotency and duplicate-credit prevention.
+- No provider identifier value, telephone number, provider transaction or request identifier, internal UUID, payload digest, callback location or token, credential, personal name, screenshot, PDF, or raw callback payload is recorded here.
+
 ## Product And Profile
 
 - [x] Product type recorded: Paybill for this controlled run
 - [x] Environment recorded: sandbox
-- [ ] Shortcode or Till identifier recorded without inventing values
+- [x] Exact sandbox Paybill identity matched across configuration, profile, URL registration, and simulator without recording its value
 - [ ] Credential type recorded
 - [ ] Credential storage or secret-reference plan reviewed
 - [x] Callback base URL recorded for the environment without a token
@@ -68,10 +80,12 @@ Automated tests verify duplicate acknowledgement, idempotency, concurrent delive
 
 ## Approval Gate
 
-- [ ] Evidence reviewed by owner
-- [ ] Provider-profile configuration approved for implementation
-- [ ] Remaining ambiguities documented
+- [x] Evidence reviewed by owner
+- [x] Provider-profile configuration approved for Phase 9.1 implementation
+- [x] Remaining ambiguities documented
 
 ## Deliberately Pending
 
-The controlled evidence does not yet establish empty-reference behavior, reference case or separator behavior, provider retry timing, provider rate limits, live duplicate redelivery, transaction-query support, Till behavior, reversal or reconciliation behavior, production-readiness differences, provider-profile approval, or final owner approval.
+The controlled evidence does not establish empty-reference behavior, reference case or separator behavior, provider retry timing, provider rate limits, live duplicate redelivery, transaction-query support, Till behavior, reversal or reconciliation behavior, or production-readiness differences. A simulator acceptance response alone is not callback-delivery evidence: future evidence must use a fresh provider request identifier and a captured callback. Never repeat a simulation merely because the portal shows a stale response.
+
+Phase 9.2, Till, production M-PESA, STK payment processing, reconciliation, and automatic renewal remain unapproved and unstarted.

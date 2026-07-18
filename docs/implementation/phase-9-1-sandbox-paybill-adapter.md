@@ -76,8 +76,25 @@ Set `MPESA_PAYBILL_INGESTION_ENABLED=false`, preserve the identifier privately, 
 
 Phase 9.1 does not enable Till, production M-PESA, STK-to-payment processing, Daraja authentication, outbound calls, transaction status, Pull Transactions, statements, reconciliation, reversal, refund, invoice, receipt, Wallet spending, activation, renewal, billing-period or billing-charge creation, suspension, notification, RADIUS, PPPoE, RouterOS, provisioning, background processing, or customer-facing payments. Phase 9.2 is not approved.
 
-## Remaining Manual Verification
+## Live Sandbox Acceptance
 
-- [ ] After Owner deployment and configuration, perform one controlled sandbox Paybill payment and verify one confirmation-to-Payment link and either one exact Wallet credit or one expected unmatched case.
+- [x] On 2026-07-18, the Owner deployed commit `4ca01b56e4d3f3a2484778929f2d917f97c52ac4` to the public LAB sandbox and completed one controlled sandbox Paybill payment.
 
-This live Phase 9.1 payment test remains pending. Automated tests and the earlier Phase 9 evidence run do not complete it.
+PostgreSQL, the broker, web, Caddy, readiness, and both public HTTPS hosts were healthy. Paybill ingestion was enabled with exactly one active sandbox M-PESA Paybill profile, and the profile matched the C2B sandbox identifier used for the successful callback.
+
+A mistakenly selected STK sandbox identifier was detected before any canonical Payment existed. The unused incorrect profile had no associated Payments, was safely deactivated, and the correct active Paybill profile was synchronized. Earlier simulator attempts displayed a stale accepted response, but no callback request reached the VPS and no callback event, Payment, callback-payment link, or Wallet entry was created.
+
+The C2B validation and confirmation URLs were then re-registered for the exact configured sandbox Paybill identifier, and Daraja acknowledged the registration successfully. A fresh controlled `CustomerPayBillOnline` sandbox request for `KSh1` with synthetic account reference `SS000001` delivered its callback immediately. The confirmation created exactly one canonical Payment in derived state `Allocated`, one full Wallet allocation, one system-sourced `payment_credit` ledger entry, and one callback-payment link. The subscriber moved from no Wallet and a `KSh0` balance to a `KSh1` balance.
+
+The subscriber had no services. The acceptance run created no BillingPeriod, BillingCharge, service activation, renewal, Wallet spending, invoice, receipt, notification, reconciliation, or network action. Equivalent retries and duplicate-credit behavior were not forced manually because the PostgreSQL automated suite already verifies them.
+
+## Operational Lessons
+
+- C2B URL registration is tied to the exact Paybill sandbox identifier.
+- An STK Business Shortcode must not be used as the Paybill ingestion identifier.
+- Environment configuration, the active provider profile, URL registration, and the simulator shortcode must all match.
+- A simulator acceptance response is not proof of callback delivery. A fresh provider request identifier and a captured callback are required evidence.
+- Never repeat a payment simulation merely because the portal displays a stale response.
+- Fail-closed provider-profile conflict handling and evidence-first callback capture prevented incorrect accounting during the corrected setup.
+
+The Owner-approved live Phase 9.1 acceptance gate is complete. Phase 9.2 remains unapproved and unstarted.

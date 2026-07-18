@@ -161,7 +161,7 @@
 - [x] Append-only callback-to-payment links.
 - [x] Permission-respecting callback and Payment cross-links.
 - [x] SQLite regression coverage and PostgreSQL concurrency coverage.
-- [ ] Owner-deployed controlled live sandbox Paybill payment verification.
+- [x] Owner-deployed controlled live sandbox Paybill payment verification.
 - [x] Stop before Phase 9.2.
 
 ## Future Phase: Billing And Payments
